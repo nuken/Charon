@@ -1,0 +1,20 @@
+[
+  {
+    "id": "cnn",
+    "name": "CNN",
+    "gracenote_id": "11118",
+    "category": "News"
+  },
+  {
+    "id": "espn",
+    "name": "ESPN",
+    "gracenote_id": "32645",
+    "category": "Sports"
+  },
+  {
+    "id": "disney",
+    "name": "Disney Channel",
+    "gracenote_id": "17013",
+    "category": "Kids"
+  }
+]
