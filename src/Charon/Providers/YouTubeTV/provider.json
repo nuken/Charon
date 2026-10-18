@@ -1,0 +1,8 @@
+{
+  "id": "youtubetv",
+  "name": "YouTube TV",
+  "groupTitle": "YouTube TV",
+  "enabled": true,
+  "loginUrl": "https://tv.youtube.com",
+  "tuneScriptDelayMs": 2000
+}

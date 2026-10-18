@@ -1,0 +1,23 @@
+html, body {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+  background: #000 !important;
+  cursor: none !important;
+}
+
+ytlr-header,
+yt-tv-header,
+.ytp-chrome-top,
+.ytp-chrome-bottom,
+.ytp-gradient-top,
+.ytp-gradient-bottom,
+.ytp-pause-overlay,
+tp-yt-paper-dialog,
+ytd-mealbar-promo-renderer {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

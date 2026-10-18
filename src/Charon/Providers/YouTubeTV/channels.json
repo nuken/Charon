@@ -1,0 +1,618 @@
+[
+  {
+    "id": "nbc-yt",
+    "name": "WCNC",
+    "channelNumber": "",
+    "stationId": "20374",
+    "url": "https://tv.youtube.com/watch/ZiQl0pbVQEk"
+  },
+  {
+    "id": "abc-yt",
+    "name": "WSOC",
+    "channelNumber": "",
+    "stationId": "20494",
+    "url": "https://tv.youtube.com/watch/cwLikITChV0"
+  },
+  {
+    "id": "fox-yt",
+    "name": "WJZY",
+    "channelNumber": "",
+    "stationId": "11594",
+    "url": "https://tv.youtube.com/watch/cTqU7N8qmXI"
+  },
+  {
+    "id": "cbs-yt",
+    "name": "WBTV",
+    "channelNumber": "",
+    "stationId": "19603",
+    "url": "https://tv.youtube.com/watch/AgwAcF7YPj8"
+  },
+  {
+    "id": "cw-yt",
+    "name": "WMYT",
+    "channelNumber": "",
+    "stationId": "31646",
+    "url": "https://tv.youtube.com/watch/CKAZtLTzbyo"
+  },
+  {
+    "id": "pbsnc-yt",
+    "name": "WUNG",
+    "channelNumber": "",
+    "stationId": "29034",
+    "url": "https://tv.youtube.com/watch/oGSfzmJxVsQ"
+  },
+  {
+    "id": "wnsc-yt",
+    "name": "WNSC",
+    "channelNumber": "",
+    "stationId": "44041",
+    "url": "https://tv.youtube.com/watch/MBbuh8iZqwc"
+  },
+  {
+    "id": "pbsc-yt",
+    "name": "WTVI",
+    "channelNumber": "",
+    "stationId": "30293",
+    "url": "https://tv.youtube.com/watch/-7VgciUYXc8"
+  },
+  {
+    "id": "tnt-yt",
+    "name": "TNT",
+    "channelNumber": "",
+    "stationId": "42642",
+    "url": "https://tv.youtube.com/watch/K3F9ZXlDx34"
+  },
+  {
+    "id": "tbs-yt",
+    "name": "TBS",
+    "channelNumber": "",
+    "stationId": "58515",
+    "url": "https://tv.youtube.com/watch/_GRYlu_xpSE"
+  },
+  {
+    "id": "uni-yt",
+    "name": "Univision",
+    "channelNumber": "",
+    "stationId": "11118",
+    "url": "https://tv.youtube.com/watch/AGPTgVlWtnk"
+  },
+  {
+    "id": "espn-yt",
+    "name": "ESPN",
+    "channelNumber": "",
+    "stationId": "32375",
+    "url": "https://tv.youtube.com/watch/UBsv3sM_DH4"
+  },
+  {
+    "id": "espn2-yt",
+    "name": "ESPN2",
+    "channelNumber": "",
+    "stationId": "45507",
+    "url": "https://tv.youtube.com/watch/nCUTMe0icck"
+  },
+  {
+    "id": "sec-yt",
+    "name": "SEC",
+    "channelNumber": "",
+    "stationId": "89714",
+    "url": "https://tv.youtube.com/watch/kyy84brOVws"
+  },
+  {
+    "id": "acc-yt",
+    "name": "ACC",
+    "channelNumber": "",
+    "stationId": "111871",
+    "url": "https://tv.youtube.com/watch/RrCkLLRDuXw"
+  },
+  {
+    "id": "espnu-yt",
+    "name": "ESPNU",
+    "channelNumber": "",
+    "stationId": "60696",
+    "url": "https://tv.youtube.com/watch/KS2p4dNUF5w"
+  },
+  {
+    "id": "espnews-yt",
+    "name": "ESPNews",
+    "channelNumber": "",
+    "stationId": "16485",
+    "url": "https://tv.youtube.com/watch/lCTPElEDFt4"
+  },
+  {
+    "id": "fs1-yt",
+    "name": "FS1",
+    "channelNumber": "",
+    "stationId": "82547",
+    "url": "https://tv.youtube.com/watch/TYWJsmNl7WE"
+  },
+  {
+    "id": "fs2-yt",
+    "name": "FS2",
+    "channelNumber": "",
+    "stationId": "59305",
+    "url": "https://tv.youtube.com/watch/SIC4RtAH3ZU"
+  },
+  {
+    "id": "nbcsn-yt",
+    "name": "NBCSN",
+    "channelNumber": "",
+    "stationId": "194412",
+    "url": "https://tv.youtube.com/watch/GHuowTpqtXU"
+  },
+  {
+    "id": "nba-yt",
+    "name": "NBA",
+    "channelNumber": "",
+    "stationId": "45526",
+    "url": "https://tv.youtube.com/watch/lmchYrC6la0"
+  },
+  {
+    "id": "nfl-yt",
+    "name": "NFL",
+    "channelNumber": "",
+    "stationId": "45399",
+    "url": "https://tv.youtube.com/watch/NlWJjcysg3k"
+  },
+  {
+    "id": "big10-yt",
+    "name": "BIG10",
+    "channelNumber": "",
+    "stationId": "58321",
+    "url": "https://tv.youtube.com/watch/X6Y2XObNyAc"
+  },
+  {
+    "id": "cbssn-yt",
+    "name": "CBSSN",
+    "channelNumber": "",
+    "stationId": "59250",
+    "url": "https://tv.youtube.com/watch/u3pb287DnQg"
+  },
+  {
+    "id": "roar-yt",
+    "name": "ROAR",
+    "channelNumber": "",
+    "stationId": "102116",
+    "url": "https://tv.youtube.com/watch/vgTkOcyTMI4"
+  },
+  {
+    "id": "golf-yt",
+    "name": "GOLF",
+    "channelNumber": "",
+    "stationId": "61854",
+    "url": "https://tv.youtube.com/watch/ye5JPFbQ7XE"
+  },
+  {
+    "id": "disney-yt",
+    "name": "Disney",
+    "channelNumber": "",
+    "stationId": "59684",
+    "url": "https://tv.youtube.com/watch/0aslf9uYuzE"
+  },
+  {
+    "id": "djch-yt",
+    "name": "DisneyJr",
+    "channelNumber": "",
+    "stationId": "74885",
+    "url": "https://tv.youtube.com/watch/rYvvcSvFfa8"
+  },
+  {
+    "id": "dxd-yt",
+    "name": "DisneyXD",
+    "channelNumber": "",
+    "stationId": "60006",
+    "url": "https://tv.youtube.com/watch/i16UPcuNCVo"
+  },
+  {
+    "id": "toon-yt",
+    "name": "Cartoon Network",
+    "channelNumber": "",
+    "stationId": "60048",
+    "url": "https://tv.youtube.com/watch/3VTAxWoAnMc"
+  },
+  {
+    "id": "nick-yt",
+    "name": "Nickelodeon",
+    "channelNumber": "",
+    "stationId": "59432",
+    "url": "https://tv.youtube.com/watch/ylDA0THF8qE"
+  },
+  {
+    "id": "nickjr-yt",
+    "name": "NickJr",
+    "channelNumber": "",
+    "stationId": "82649",
+    "url": "https://tv.youtube.com/watch/yMT5ZQUhFaA"
+  },
+  {
+    "id": "nktn-yt",
+    "name": "NickToons",
+    "channelNumber": "",
+    "stationId": "30420",
+    "url": "https://tv.youtube.com/watch/oUoCKwODo2s"
+  },
+  {
+    "id": "tnck-yt",
+    "name": "TeenNick",
+    "channelNumber": "",
+    "stationId": "59036",
+    "url": "https://tv.youtube.com/watch/n8WhZmFkrCY"
+  },
+  {
+    "id": "amc-yt",
+    "name": "AMC",
+    "channelNumber": "",
+    "stationId": "59337",
+    "url": "https://tv.youtube.com/watch/UCDwwdgMSQo"
+  },
+  {
+    "id": "bbc-yt",
+    "name": "BBC",
+    "channelNumber": "",
+    "stationId": "64492",
+    "url": "https://tv.youtube.com/watch/i27FBUP4I30"
+  },
+  {
+    "id": "bbcn-yt",
+    "name": "BBCNews",
+    "channelNumber": "",
+    "stationId": "101449",
+    "url": "https://tv.youtube.com/watch/Nfy449QPeKI"
+  },
+  {
+    "id": "bet-yt",
+    "name": "BET",
+    "channelNumber": "",
+    "stationId": "63236",
+    "url": "https://tv.youtube.com/watch/qXZClenBtHw"
+  },
+  {
+    "id": "cmt-yt",
+    "name": "CMT",
+    "channelNumber": "",
+    "stationId": "59440",
+    "url": "https://tv.youtube.com/watch/GEl1vicZT0Y"
+  },
+  {
+    "id": "cc-yt",
+    "name": "Comedy Central",
+    "channelNumber": "",
+    "stationId": "10149",
+    "url": "https://tv.youtube.com/watch/GAVz-AqYit0"
+  },
+  {
+    "id": "ff-yt",
+    "name": "Freeform",
+    "channelNumber": "",
+    "stationId": "59615",
+    "url": "https://tv.youtube.com/watch/VOtMR8zTNRU"
+  },
+  {
+    "id": "fx-yt",
+    "name": "FX",
+    "channelNumber": "",
+    "stationId": "58574",
+    "url": "https://tv.youtube.com/watch/EajPc5BZWCM"
+  },
+  {
+    "id": "fxx-yt",
+    "name": "FXX",
+    "channelNumber": "",
+    "stationId": "66379",
+    "url": "https://tv.youtube.com/watch/pNRtUVaVzns"
+  },
+  {
+    "id": "fxm-yt",
+    "name": "FXM",
+    "channelNumber": "",
+    "stationId": "70253",
+    "url": "https://tv.youtube.com/watch/sJlRS-dxlew"
+  },
+  {
+    "id": "hall-yt",
+    "name": "Hallmark",
+    "channelNumber": "",
+    "stationId": "66268",
+    "url": "https://tv.youtube.com/watch/s0vGZLnl1X4"
+  },
+  {
+    "id": "gfam-yt",
+    "name": "GFAM",
+    "channelNumber": "",
+    "stationId": "82892",
+    "url": "https://tv.youtube.com/watch/fgQTPoYUAmo"
+  },
+  {
+    "id": "mtv-yt",
+    "name": "MTV",
+    "channelNumber": "",
+    "stationId": "60964",
+    "url": "https://tv.youtube.com/watch/BhSdyXHid9E"
+  },
+  {
+    "id": "mtv2-yt",
+    "name": "MTV2",
+    "channelNumber": "",
+    "stationId": "75077",
+    "url": "https://tv.youtube.com/watch/f-fy_p7oaaU"
+  },
+  {
+    "id": "mtvc-yt",
+    "name": "MTV Classic",
+    "channelNumber": "",
+    "stationId": "22561",
+    "url": "https://tv.youtube.com/watch/RY1Abwd-b8M"
+  },
+  {
+    "id": "vh1-yt",
+    "name": "VH1",
+    "channelNumber": "",
+    "stationId": "60046",
+    "url": "https://tv.youtube.com/watch/noKDhW-r_NA"
+  },
+  {
+    "id": "par-yt",
+    "name": "Paramount",
+    "channelNumber": "",
+    "stationId": "59186",
+    "url": "https://tv.youtube.com/watch/NOAQVAaGhQA"
+  },
+  {
+    "id": "pop-yt",
+    "name": "Pop",
+    "channelNumber": "",
+    "stationId": "68796",
+    "url": "https://tv.youtube.com/watch/2fFgm0Le--c"
+  },
+  {
+    "id": "tcm-yt",
+    "name": "TCM",
+    "channelNumber": "",
+    "stationId": "64312",
+    "url": "https://tv.youtube.com/watch/iAVc3ce_1sM"
+  },
+  {
+    "id": "tru-yt",
+    "name": "Tru",
+    "channelNumber": "",
+    "stationId": "64490",
+    "url": "https://tv.youtube.com/watch/dyLsvAzAF6g"
+  },
+  {
+    "id": "usa-yt",
+    "name": "USA",
+    "channelNumber": "",
+    "stationId": "58452",
+    "url": "https://tv.youtube.com/watch/S_riPMHiDJQ"
+  },
+  {
+    "id": "newsn-yt",
+    "name": "News Nation",
+    "channelNumber": "",
+    "stationId": "91096",
+    "url": "https://tv.youtube.com/watch/404zGhhbOS8"
+  },
+  {
+    "id": "ngc-yt",
+    "name": "NatGeo",
+    "channelNumber": "",
+    "stationId": "49438",
+    "url": "https://tv.youtube.com/watch/EM4W5fPgmkw"
+  },
+  {
+    "id": "ngwi-yt",
+    "name": "NatGeo Wild",
+    "channelNumber": "",
+    "stationId": "67331",
+    "url": "https://tv.youtube.com/watch/XAbFaPs0uYQ"
+  },
+  {
+    "id": "apl-yt",
+    "name": "Animal Planet",
+    "channelNumber": "",
+    "stationId": "57394",
+    "url": "https://tv.youtube.com/watch/RgShPQ5UYH0"
+  },
+  {
+    "id": "discovery-yt",
+    "name": "Discovery",
+    "channelNumber": "",
+    "stationId": "56905",
+    "url": "https://tv.youtube.com/watch/JnIMvxxHDjA"
+  },
+  {
+    "id": "syfy-yt",
+    "name": "SYFY",
+    "channelNumber": "",
+    "stationId": "58623",
+    "url": "https://tv.youtube.com/watch/DV3lZ7eimkM"
+  },
+  {
+    "id": "trav-yt",
+    "name": "Trvl",
+    "channelNumber": "",
+    "stationId": "11180",
+    "url": "https://tv.youtube.com/watch/mNDuHKzp_5M"
+  },
+  {
+    "id": "tvln-yt",
+    "name": "TV Land",
+    "channelNumber": "",
+    "stationId": "73541",
+    "url": "https://tv.youtube.com/watch/OXZQix2QMZo"
+  },
+  {
+    "id": "bravo-yt",
+    "name": "Bravo",
+    "channelNumber": "",
+    "stationId": "58625",
+    "url": "https://tv.youtube.com/watch/kWuBmoGIxag"
+  },
+  {
+    "id": "court-yt",
+    "name": "Court TV",
+    "channelNumber": "",
+    "stationId": "111043",
+    "url": "https://tv.youtube.com/watch/tcwDSc2U1CM"
+  },
+  {
+    "id": "dabl-yt",
+    "name": "dabl",
+    "channelNumber": "",
+    "stationId": "112341",
+    "url": "https://tv.youtube.com/watch/K9ghID4NvXI"
+  },
+  {
+    "id": "etv-yt",
+    "name": "Etv",
+    "channelNumber": "",
+    "stationId": "61812",
+    "url": "https://tv.youtube.com/watch/9CrweyAWN9A"
+  },
+  {
+    "id": "food-yt",
+    "name": "Food",
+    "channelNumber": "",
+    "stationId": "50747",
+    "url": "https://tv.youtube.com/watch/gzzjXSoSMXs"
+  },
+  {
+    "id": "mag-yt",
+    "name": "Magnolia",
+    "channelNumber": "",
+    "stationId": "67375",
+    "url": "https://tv.youtube.com/watch/pBS9x2-I1-s"
+  },
+  {
+    "id": "hgtv-yt",
+    "name": "HGTV",
+    "channelNumber": "",
+    "stationId": "49788",
+    "url": "https://tv.youtube.com/watch/ZlMmrwBmzEs"
+  },
+  {
+    "id": "just-yt",
+    "name": "Justice",
+    "channelNumber": "",
+    "stationId": "78850",
+    "url": "https://tv.youtube.com/watch/JUc7biOh0GE"
+  },
+  {
+    "id": "id-yt",
+    "name": "ID",
+    "channelNumber": "",
+    "stationId": "65342",
+    "url": "https://tv.youtube.com/watch/ZZrPyjutKqQ"
+  },
+  {
+    "id": "own-yt",
+    "name": "OWN",
+    "channelNumber": "",
+    "stationId": "70388",
+    "url": "https://tv.youtube.com/watch/iWXoCWPrKIs"
+  },
+  {
+    "id": "oxytc-yt",
+    "name": "Oxygen",
+    "channelNumber": "",
+    "stationId": "70522",
+    "url": "https://tv.youtube.com/watch/D0QysW6TO_0"
+  },
+  {
+    "id": "tlc-yt",
+    "name": "TLC",
+    "channelNumber": "",
+    "stationId": "57391",
+    "url": "https://tv.youtube.com/watch/8XjXo2jtgCY"
+  },
+  {
+    "id": "we-yt",
+    "name": "WE",
+    "channelNumber": "",
+    "stationId": "59296",
+    "url": "https://tv.youtube.com/watch/lZcTp_hNvEs"
+  },
+  {
+    "id": "ched-yt",
+    "name": "Cheddar",
+    "channelNumber": "",
+    "stationId": "107241",
+    "url": "https://tv.youtube.com/watch/_Nk5ayIPxHg"
+  },
+  {
+    "id": "cnbc-yt",
+    "name": "CNBC",
+    "channelNumber": "",
+    "stationId": "58780",
+    "url": "https://tv.youtube.com/watch/LXfrE81qMGA"
+  },
+  {
+    "id": "blmb-yt",
+    "name": "Bloomberg",
+    "channelNumber": "",
+    "stationId": "71799",
+    "url": "https://tv.youtube.com/watch/VPS3bRXlrw8"
+  },
+  {
+    "id": "cspan-yt",
+    "name": "CSPAN",
+    "channelNumber": "",
+    "stationId": "10161",
+    "url": "https://tv.youtube.com/watch/IouCNrDPGXE"
+  },
+  {
+    "id": "cspan2-yt",
+    "name": "CSPAN2",
+    "channelNumber": "",
+    "stationId": "10162",
+    "url": "https://tv.youtube.com/watch/bOb_pWEjdUM"
+  },
+  {
+    "id": "cnn-yt",
+    "name": "CNN",
+    "channelNumber": "",
+    "stationId": "58646",
+    "url": "https://tv.youtube.com/watch/XrFkRfdWEkQ"
+  },
+  {
+    "id": "fnc-yt",
+    "name": "Fox News",
+    "channelNumber": "",
+    "stationId": "60179",
+    "url": "https://tv.youtube.com/watch/NR1PA-gRyR8"
+  },
+  {
+    "id": "fwx-yt",
+    "name": "Fox Weather",
+    "channelNumber": "",
+    "stationId": "121307",
+    "url": "https://tv.youtube.com/watch/guwnNDpeYmQ"
+  },
+  {
+    "id": "newsm-yt",
+    "name": "NEWSMAX",
+    "channelNumber": "",
+    "stationId": "97163",
+    "url": "https://tv.youtube.com/watch/CCIZG3NimsA"
+  },
+  {
+    "id": "scnews-yt",
+    "name": "Scripps News",
+    "channelNumber": "",
+    "stationId": "96827",
+    "url": "https://tv.youtube.com/watch/yWjTs0ftIFE"
+  },
+  {
+    "id": "weather-yt",
+    "name": "TWC",
+    "channelNumber": "",
+    "stationId": "58812",
+    "url": "https://tv.youtube.com/watch/MnR3GlweSok"
+  },
+  {
+    "id": "hln-yt",
+    "name": "HLN",
+    "channelNumber": "",
+    "stationId": "64549",
+    "url": "https://tv.youtube.com/watch/LLc4uRD8NnA"
+  }
+]
