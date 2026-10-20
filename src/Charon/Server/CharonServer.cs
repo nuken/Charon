@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging;
 using Charon.Config;
 using Charon.Providers;
@@ -75,15 +76,23 @@ public sealed class CharonServer : IAsyncDisposable
             {
                 _log($"[Server] All {_config.MaxConcurrentTuners} tuner slots are busy. Rejecting tune for {channel.Name}.");
                 ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                ctx.Response.Headers.RetryAfter = "5";
                 await ctx.Response.WriteAsync("All tuner slots are currently in use.");
                 return;
             }
 
             try
             {
+                // Disable Kestrel response buffering so MPEG-TS packets flow to Channels DVR with zero latency
+                ctx.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+
                 ctx.Response.StatusCode = StatusCodes.Status200OK;
                 ctx.Response.ContentType = "video/mp2t";
                 ctx.Response.Headers.CacheControl = "no-cache, no-store";
+
+                // Flush HTTP 200 OK headers immediately (in <10ms) so Channels DVR opens the connection right away
+                // and NEVER times out with "901 Tuner Unreachable"!
+                await ctx.Response.StartAsync(ctx.RequestAborted);
 
                 await _tuner.StreamChannelAsync(
                     tunerId,
