@@ -16,6 +16,7 @@ public sealed class ChromeTuner
 {
     private readonly CharonConfig _config;
     private static readonly HttpClient Http = new();
+    private static readonly object ProfileSyncLock = new();
 
     // 1280x752 in --app mode = 32px Windows title bar + exact 1280x720 (16:9) client viewport
     private const int WindowWidth = 1280;
@@ -33,9 +34,10 @@ public sealed class ChromeTuner
         return path;
     }
 
-    public Process? LaunchInteractiveLogin(string loginUrl)
+    public Process? LaunchInteractiveLogin(string loginUrl, Action<string>? logCallback = null)
     {
         string primaryTunerProfile = GetTunerProfilePath(1);
+        KillChromeProcessesForPortOrProfile(48601, primaryTunerProfile);
         TryDeleteFile(Path.Combine(primaryTunerProfile, "SingletonLock"));
 
         var psi = new ProcessStartInfo
@@ -61,24 +63,28 @@ public sealed class ChromeTuner
                 try
                 {
                     await proc.WaitForExitAsync();
-                    await Task.Delay(300);
-                    string profilesRoot = Path.Combine(AppContext.BaseDirectory, "Profiles");
-                    if (Directory.Exists(profilesRoot))
-                    {
-                        foreach (string dir in Directory.GetDirectories(profilesRoot, "Tuner_*"))
-                        {
-                            if (!dir.EndsWith("Tuner_1", StringComparison.OrdinalIgnoreCase))
-                            {
-                                try { Directory.Delete(dir, recursive: true); } catch { }
-                            }
-                        }
-                    }
+                    await Task.Delay(500);
+                    SyncMasterAuthToAllTuners(logCallback);
                 }
                 catch { }
             });
         }
 
         return proc;
+    }
+
+    public void SyncMasterAuthToAllTuners(Action<string>? logCallback = null)
+    {
+        for (int id = 2; id <= 4; id++)
+        {
+            try
+            {
+                KillChromeProcessesForPortOrProfile(48600 + id, GetTunerProfilePath(id));
+                SyncAuthFromTuner1(id, forceFullSync: true);
+            }
+            catch { }
+        }
+        logCallback?.Invoke("[Auth] Single Sign-In session synced from Tuner 1 to Tuners 2, 3, and 4.");
     }
 
     public async Task StreamChannelAsync(
@@ -89,9 +95,10 @@ public sealed class ChromeTuner
         Action<string>? logCallback,
         CancellationToken ct)
     {
-        string tunerProfile = PrepareTunerProfile(tunerId);
+        var tuneTimer = Stopwatch.StartNew();
         int debugPort = 48600 + tunerId;
         int wsPort = 48700 + tunerId;
+        string tunerProfile = PrepareTunerProfile(tunerId, debugPort);
 
         (string extDir, string extensionId) = EnsureTabCaptureExtension(tunerId, wsPort, provider);
 
@@ -109,7 +116,6 @@ public sealed class ChromeTuner
             $"--allowlisted-extension-id={extensionId}",
             $"--app=\"{channel.Url}\"",
             $"--window-size={WindowWidth},{WindowHeight}",
-            "--window-position=0,0",
             "--force-device-scale-factor=1",
             "--autoplay-policy=no-user-gesture-required",
             "--enable-gpu-rasterization",
@@ -117,6 +123,7 @@ public sealed class ChromeTuner
             "--ignore-gpu-blocklist",
             "--enable-accelerated-video-decode",
             "--enable-accelerated-video-encode",
+            "--disable-gpu-vsync",
             "--disable-background-media-suspend",
             "--disable-background-timer-throttling",
             "--disable-backgrounding-occluded-windows",
@@ -132,7 +139,7 @@ public sealed class ChromeTuner
             "--no-default-browser-check"
         ]);
 
-        logCallback?.Invoke($"[Tuner {tunerId}] Launching Chrome (V12) for {provider.Manifest.Name} -> {channel.Name}...");
+        logCallback?.Invoke($"[Tuner {tunerId}] Launching Chrome (V21 Fast-Tune) for {provider.Manifest.Name} -> {channel.Name}...");
 
         using var chromeProcess = Process.Start(new ProcessStartInfo
         {
@@ -141,30 +148,30 @@ public sealed class ChromeTuner
             UseShellExecute = false
         }) ?? throw new InvalidOperationException("Failed to start Chrome process.");
 
-        // Keep Chrome at Normal priority so launching Tuner 2 never starves Tuner 1's active stream!
-        try { chromeProcess.PriorityClass = ProcessPriorityClass.Normal; } catch { }
+        try { chromeProcess.PriorityClass = ProcessPriorityClass.AboveNormal; } catch { }
 
         Process? ffmpegProcess = null;
 
         try
         {
-            // 1. Load extension, lock 1280x720 DeviceMetricsOverride, and handle unpausing
-            _ = Task.Run(() => SetupTabAndEmulateSurfaceAsync(chromeProcess.Id, debugPort, extDir, provider, logCallback, tunerId, ct), ct);
+            // 1. Load extension and place window off-screen
+            _ = Task.Run(() => LoadExtensionAndPlaceWindowAsync(chromeProcess.Id, debugPort, extDir, provider, logCallback, tunerId, ct), ct);
 
-            // 2. Launch FFmpeg with low-latency flags (-probesize 16384, -fflags +genpts+nobuffer+flush_packets, -avioflags direct)
+            // 2. Launch FFmpeg
             string ffmpegPath = Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe");
             string ffmpegArgs = string.Join(" ",
             [
                 "-hide_banner -loglevel warning",
-                "-fflags +genpts+nobuffer+flush_packets",
-                "-probesize 16384 -analyzeduration 0 -fpsprobesize 0",
-                "-f matroska -i pipe:0",
+                "-fflags +genpts+nobuffer",
+                "-probesize 262144 -analyzeduration 500000",
+                "-f webm -i pipe:0",
                 "-map 0:v:0 -map 0:a:0?",
                 "-c:v copy",
                 "-bsf:v h264_mp4toannexb,dump_extra",
                 "-c:a aac -b:a 192k -ar 48000 -ac 2",
                 "-af \"aresample=async=1000\"",
-                "-avoid_negative_ts make_zero -max_interleave_delta 0 -muxdelay 0 -muxpreload 0 -flush_packets 1 -avioflags direct -mpegts_flags +initial_discontinuity+resend_headers -f mpegts pipe:1"
+                "-avoid_negative_ts make_zero -max_interleave_delta 0 -muxdelay 0 -muxpreload 0 -flush_packets 1",
+                "-pat_period 0.25 -sdt_period 0.25 -mpegts_flags +initial_discontinuity+resend_headers -f mpegts pipe:1"
             ]);
 
             ffmpegProcess = Process.Start(new ProcessStartInfo
@@ -178,7 +185,7 @@ public sealed class ChromeTuner
                 CreateNoWindow = true
             }) ?? throw new InvalidOperationException("Failed to start FFmpeg.");
 
-            try { ffmpegProcess.PriorityClass = ProcessPriorityClass.AboveNormal; } catch { }
+            try { ffmpegProcess.PriorityClass = ProcessPriorityClass.High; } catch { }
 
             _ = Task.Run(async () =>
             {
@@ -195,8 +202,6 @@ public sealed class ChromeTuner
             }, ct);
 
             // 3. Accept WebSocket stream connection from offscreen.js
-            // V12 FIX: Only break out and close FFmpeg stdin if totalBytesWritten > 0!
-            // If an early WebSocket closes with 0 bytes during a tab retry, keep listening for the retry WebSocket so FFmpeg NEVER fails with "EBML header parsing failed"!
             var listenerTask = Task.Run(async () =>
             {
                 try
@@ -237,10 +242,9 @@ public sealed class ChromeTuner
                                     if (!loggedStart)
                                     {
                                         loggedStart = true;
-                                        logCallback?.Invoke($"[Tuner {tunerId}] Live Video Active! Streaming 16:9 720p60 H.264 to FFmpeg...");
+                                        logCallback?.Invoke($"[Tuner {tunerId}] WebM stream active at +{tuneTimer.Elapsed.TotalSeconds:F1}s -> piping to FFmpeg...");
                                     }
                                     await ffmpegIn.WriteAsync(buffer.AsMemory(0, result.Count), ct);
-                                    await ffmpegIn.FlushAsync(ct);
                                     totalBytesWritten += result.Count;
                                 }
                             }
@@ -268,7 +272,26 @@ public sealed class ChromeTuner
                 }
             }, ct);
 
-            await ffmpegProcess.StandardOutput.BaseStream.CopyToAsync(outputStream, 16384, ct);
+            // 4. Read FFmpeg's MPEG-TS stdout and flush immediately!
+            Stream ffmpegOut = ffmpegProcess.StandardOutput.BaseStream;
+            byte[] outBuf = new byte[32768];
+            bool firstTsPacketLogged = false;
+
+            while (!ct.IsCancellationRequested)
+            {
+                int read = await ffmpegOut.ReadAsync(outBuf, ct);
+                if (read <= 0) break;
+
+                if (!firstTsPacketLogged)
+                {
+                    firstTsPacketLogged = true;
+                    logCallback?.Invoke($"[Tuner {tunerId}] First MPEG-TS packet delivered to Client at +{tuneTimer.Elapsed.TotalSeconds:F1}s!");
+                }
+
+                await outputStream.WriteAsync(outBuf.AsMemory(0, read), ct);
+                await outputStream.FlushAsync(ct);
+            }
+
             await listenerTask;
         }
         catch (OperationCanceledException)
@@ -277,7 +300,6 @@ public sealed class ChromeTuner
         }
         finally
         {
-            // FAST <5ms CLEANUP: Release the tuner slot immediately so Channels DVR retries never get "All 2 tuner slots are busy"!
             try { httpListener.Stop(); } catch { }
 
             try
@@ -286,6 +308,8 @@ public sealed class ChromeTuner
                     ffmpegProcess.Kill(entireProcessTree: true);
             }
             catch { }
+
+            KillChromeProcessesForPortOrProfile(debugPort, tunerProfile);
 
             try
             {
@@ -297,7 +321,7 @@ public sealed class ChromeTuner
         }
     }
 
-    private async Task SetupTabAndEmulateSurfaceAsync(
+    private async Task LoadExtensionAndPlaceWindowAsync(
         int chromeProcessId,
         int debugPort,
         string extDir,
@@ -378,24 +402,16 @@ public sealed class ChromeTuner
                 await SendCdpCommandAsync(ws, 1, "Page.enable", new { }, ct);
                 await SendCdpCommandAsync(ws, 2, "Emulation.setFocusEmulationEnabled", new { enabled = true }, ct);
 
-                await SendCdpCommandAsync(ws, 3, "Emulation.setDeviceMetricsOverride", new
-                {
-                    width = 1280,
-                    height = 720,
-                    deviceScaleFactor = 1,
-                    mobile = false
-                }, ct);
-
                 if (!string.IsNullOrWhiteSpace(provider.TuneJs))
                 {
-                    await SendCdpCommandAsync(ws, 4, "Page.addScriptToEvaluateOnNewDocument", new { source = provider.TuneJs }, ct);
+                    await SendCdpCommandAsync(ws, 3, "Page.addScriptToEvaluateOnNewDocument", new { source = provider.TuneJs }, ct);
                 }
 
                 int msgId = 10;
                 for (int i = 0; i < 12; i++)
                 {
                     ct.ThrowIfCancellationRequested();
-                    await Task.Delay(400, ct);
+                    await Task.Delay(350, ct);
 
                     if (!string.IsNullOrWhiteSpace(provider.TuneJs))
                     {
@@ -497,7 +513,7 @@ public sealed class ChromeTuner
         string baseExtDir = Path.Combine(AppContext.BaseDirectory, "TabCaptureExt");
         Directory.CreateDirectory(baseExtDir);
 
-        string keyFile = Path.Combine(baseExtDir, "rsa_spki_v12.b64");
+        string keyFile = Path.Combine(baseExtDir, "rsa_spki_v20.b64");
         byte[] spkiBytes;
         if (File.Exists(keyFile))
         {
@@ -526,8 +542,8 @@ public sealed class ChromeTuner
         string manifestJson = $$"""
         {
           "manifest_version": 3,
-          "name": "Charon V12 MultiTuner 16x9 TabCapture Bridge",
-          "version": "12.0.0",
+          "name": "Charon V21 Bulletproof TabCapture Bridge",
+          "version": "20.0.0",
           "key": "{{publicKeyBase64}}",
           "permissions": [
             "tabCapture",
@@ -573,39 +589,29 @@ public sealed class ChromeTuner
         }
         File.WriteAllText(Path.Combine(extDir, "main_world.js"), mainWorldBuilder.ToString());
 
+        // Only fire PAGE_COMMITTED once the real http/https document has committed (never on the initial about:blank placeholder!)
         const string notifyLifecycleJs = """
         (function() {
           if (window.__charonLifecycleNotifier) return;
           window.__charonLifecycleNotifier = true;
-
           if (location.protocol.startsWith('http')) {
             try { chrome.runtime.sendMessage({ type: 'PAGE_COMMITTED' }); } catch {}
           }
-
-          let sentPlaying = false;
-          const timer = setInterval(() => {
-            if (sentPlaying) { clearInterval(timer); return; }
-            const v = Array.from(document.querySelectorAll('video')).find(
-              x => !x.paused && x.readyState >= 2 && x.videoWidth > 0 && x.currentTime > 0 && !x.closest('ytu-epg-row, ytu-guide, .tenx-thumb')
-            );
-            if (v) {
-              sentPlaying = true;
-              clearInterval(timer);
-              try { chrome.runtime.sendMessage({ type: 'VIDEO_PLAYING_NOW' }); } catch {}
-            }
-          }, 30);
         })();
         """;
         File.WriteAllText(Path.Combine(extDir, "content.js"), notifyLifecycleJs);
 
-        // V12 MULTI-TUNER FIX: Does NOT get stuck waiting 10+ seconds for t.url.startsWith('http') when Tuner 2 is loading!
-        // Captures the app window tab as soon as PAGE_COMMITTED fires OR after 450ms!
+        // V21 BULLETPROOF HANDSHAKE:
+        // 1. Waits until the tab has committed to http/https (or 350ms after service worker start) so we NEVER capture the dying about:blank process!
+        // 2. Uses a continuous retry loop between background.js and offscreen.js until STREAM_LOCKED_OK is confirmed!
         string backgroundJs = $$"""
-        const log = (msg) => fetch('http://127.0.0.1:{{wsPort}}/log?msg=' + encodeURIComponent('BG_V12: ' + msg)).catch(() => {});
+        const log = (msg) => fetch('http://127.0.0.1:{{wsPort}}/log?msg=' + encodeURIComponent('BG_V21: ' + msg)).catch(() => {});
         log('Service worker started');
 
-        let capturingTabId = null;
-        const startTime = Date.now();
+        let streamLocked = false;
+        let busyMinting = false;
+        let knownTabId = null;
+        const swStart = Date.now();
 
         const offscreenReady = (async () => {
           const existingContexts = await chrome.runtime.getContexts({
@@ -620,67 +626,70 @@ public sealed class ChromeTuner
           }
         })();
 
-        async function startCaptureForTab(tabId) {
-          if (capturingTabId !== null) return;
-          capturingTabId = tabId;
+        async function mintAndSendStreamId(tabId) {
+          if (streamLocked || busyMinting || !tabId) return;
+          busyMinting = true;
 
           try {
-            const [streamId] = await Promise.all([
-              chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }),
-              offscreenReady
-            ]);
+            await offscreenReady;
+            const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
             log('Got streamId for tab ' + tabId);
 
             chrome.runtime.sendMessage({
-              type: 'PREPARE_STREAM',
+              type: 'START_IMMEDIATE_STREAM',
               streamId: streamId,
-              tabId: tabId,
               wsPort: {{wsPort}}
-            });
+            }).catch(() => {});
           } catch (err) {
-            capturingTabId = null;
+            // Will automatically retry on next tick
+          } finally {
+            busyMinting = false;
           }
         }
 
         chrome.runtime.onMessage.addListener((msg, sender) => {
+          if (msg.type === 'STREAM_LOCKED_OK') {
+            streamLocked = true;
+            return;
+          }
           if (msg.type === 'PAGE_COMMITTED' && sender && sender.tab && sender.tab.id) {
-            startCaptureForTab(sender.tab.id);
-          } else if (msg.type === 'RETRY_CAPTURE') {
-            capturingTabId = null;
-            setTimeout(findAndCaptureAppTab, 250);
+            knownTabId = sender.tab.id;
+            mintAndSendStreamId(knownTabId);
+          } else if (msg.type === 'RETRY_CAPTURE' || msg.type === 'OFFSCREEN_READY') {
+            if (knownTabId) {
+              setTimeout(() => mintAndSendStreamId(knownTabId), 180);
+            } else {
+              setTimeout(pollForCommittedTab, 180);
+            }
           }
         });
 
-        async function findAndCaptureAppTab() {
-          if (capturingTabId !== null) return;
-          try {
-            const windows = await chrome.windows.getAll({
-              populate: true,
-              windowTypes: ['app', 'normal', 'popup']
-            });
-            const elapsed = Date.now() - startTime;
-            for (const w of (windows || [])) {
-              for (const t of (w.tabs || [])) {
-                if (!t.id) continue;
-                if (t.url && t.url.startsWith('chrome-extension://')) continue;
-                // Grab immediately if t.url is http*, OR after 450ms even if Chrome hasn't populated t.url yet on Tuner 2!
-                if ((t.url && t.url.startsWith('http')) || elapsed >= 450) {
-                  startCaptureForTab(t.id);
-                  return;
-                }
-              }
+        function pollForCommittedTab() {
+          if (streamLocked || busyMinting) return;
+          chrome.tabs.query({}, (tabs) => {
+            if (streamLocked || busyMinting) return;
+            const elapsed = Date.now() - swStart;
+            const t = (tabs || []).find(x =>
+              x.id &&
+              (!x.url || !x.url.startsWith('chrome-extension://')) &&
+              ((x.url && x.url.startsWith('http')) || elapsed >= 350)
+            );
+            if (t && t.id) {
+              knownTabId = t.id;
+              mintAndSendStreamId(t.id);
             }
-          } catch {}
+          });
         }
 
         const timer = setInterval(() => {
-          if (capturingTabId !== null) {
+          if (streamLocked) {
             clearInterval(timer);
             return;
           }
-          findAndCaptureAppTab();
-        }, 40);
-        findAndCaptureAppTab();
+          if (!knownTabId) {
+            pollForCommittedTab();
+          }
+        }, 50);
         """;
         File.WriteAllText(Path.Combine(extDir, "background.js"), backgroundJs);
 
@@ -693,71 +702,18 @@ public sealed class ChromeTuner
         """;
         File.WriteAllText(Path.Combine(extDir, "offscreen.html"), offscreenHtml);
 
-        // V12 FIX: Only open the WebSocket AFTER getUserMedia succeeds!
-        // That way, if getUserMedia ever retries on Tuner 2, it never opens & closes an empty WebSocket (which caused EBML header parsing failed)!
         const string offscreenJs = """
-        let preparedStream = null;
-        let readySocket = null;
-        let targetWsPort = null;
-        let recorderStarted = false;
-        let videoReadyReceived = false;
-
-        function triggerRecorderStart() {
-          if (recorderStarted || !preparedStream || !targetWsPort) return;
-          recorderStarted = true;
-
-          const ws = (readySocket && (readySocket.readyState === WebSocket.OPEN || readySocket.readyState === WebSocket.CONNECTING))
-            ? readySocket
-            : new WebSocket('ws://127.0.0.1:' + targetWsPort + '/');
-          ws.binaryType = 'arraybuffer';
-
-          const beginRecording = () => {
-            const mimeTypes = [
-              'video/x-matroska;codecs=avc1.64002A,opus',
-              'video/x-matroska;codecs=avc1.640020,opus',
-              'video/x-matroska;codecs=h264,opus',
-              'video/webm;codecs=avc1.64002A,opus',
-              'video/webm;codecs=h264,opus',
-              'video/webm'
-            ];
-            const mimeType = mimeTypes.find((t) => MediaRecorder.isTypeSupported(t)) || 'video/webm';
-
-            const recorder = new MediaRecorder(preparedStream, {
-              mimeType: mimeType,
-              videoBitsPerSecond: 7500000,
-              audioBitsPerSecond: 192000,
-              videoKeyFrameIntervalDuration: 800
-            });
-
-            recorder.ondataavailable = (e) => {
-              if (e.data && e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-                ws.send(e.data);
-              }
-            };
-
-            recorder.start(50);
-          };
-
-          if (ws.readyState === WebSocket.OPEN) {
-            beginRecording();
-          } else {
-            ws.onopen = beginRecording;
-          }
-        }
+        let activeRecorder = null;
+        let isStarting = false;
 
         chrome.runtime.onMessage.addListener(async (msg) => {
-          if (msg.type === 'VIDEO_PLAYING_NOW') {
-            videoReadyReceived = true;
-            triggerRecorderStart();
-            return;
-          }
-
-          if (msg.type !== 'PREPARE_STREAM') return;
-          targetWsPort = msg.wsPort;
-          const log = (m) => fetch('http://127.0.0.1:' + targetWsPort + '/log?msg=' + encodeURIComponent('OFFSCREEN: ' + m)).catch(() => {});
+          if (msg.type !== 'START_IMMEDIATE_STREAM' || activeRecorder || isStarting) return;
+          isStarting = true;
+          const wsPort = msg.wsPort;
+          const log = (m) => fetch('http://127.0.0.1:' + wsPort + '/log?msg=' + encodeURIComponent('OFFSCREEN: ' + m)).catch(() => {});
 
           try {
-            preparedStream = await navigator.mediaDevices.getUserMedia({
+            const stream = await navigator.mediaDevices.getUserMedia({
               audio: {
                 mandatory: {
                   chromeMediaSource: 'tab',
@@ -777,63 +733,147 @@ public sealed class ChromeTuner
               }
             });
 
-            // Open WebSocket ONLY AFTER getUserMedia succeeds so an early retry never closes an empty pipe!
-            readySocket = new WebSocket('ws://127.0.0.1:' + targetWsPort + '/');
-            readySocket.binaryType = 'arraybuffer';
+            // Tell background.js that getUserMedia succeeded so it stops polling!
+            chrome.runtime.sendMessage({ type: 'STREAM_LOCKED_OK' }).catch(() => {});
 
-            const videoTrack = preparedStream.getVideoTracks()[0];
+            const videoTrack = stream.getVideoTracks()[0];
             if (videoTrack && 'contentHint' in videoTrack) {
               videoTrack.contentHint = 'motion';
             }
 
-            if (videoReadyReceived) {
-              triggerRecorderStart();
-            } else {
-              setTimeout(triggerRecorderStart, 1800);
-            }
+            const ws = new WebSocket('ws://127.0.0.1:' + wsPort + '/');
+            ws.binaryType = 'arraybuffer';
+
+            ws.onopen = () => {
+              const mimeTypes = [
+                'video/webm;codecs=avc1.64002A,opus',
+                'video/webm;codecs=avc1.640020,opus',
+                'video/webm;codecs=avc1.4D4020,opus',
+                'video/webm;codecs=h264,opus',
+                'video/webm'
+              ];
+              const mimeType = mimeTypes.find((t) => MediaRecorder.isTypeSupported(t)) || 'video/webm';
+
+              activeRecorder = new MediaRecorder(stream, {
+                mimeType: mimeType,
+                videoBitsPerSecond: 12000000,
+                audioBitsPerSecond: 192000,
+                videoKeyFrameIntervalDuration: 1500
+              });
+
+              activeRecorder.ondataavailable = (e) => {
+                if (e.data && e.data.size > 0 && ws.readyState === WebSocket.OPEN) {
+                  ws.send(e.data);
+                }
+              };
+
+              activeRecorder.start(80);
+            };
           } catch (err) {
+            activeRecorder = null;
+            isStarting = false;
             log('Retrying getUserMedia: ' + (err && err.message ? err.message : String(err)));
-            chrome.runtime.sendMessage({ type: 'RETRY_CAPTURE' });
+            chrome.runtime.sendMessage({ type: 'RETRY_CAPTURE' }).catch(() => {});
           }
         });
+
+        // Notify background.js as soon as our message listener is registered!
+        chrome.runtime.sendMessage({ type: 'OFFSCREEN_READY' }).catch(() => {});
         """;
         File.WriteAllText(Path.Combine(extDir, "offscreen.js"), offscreenJs);
 
         return (extDir, extensionId);
     }
 
-    private string PrepareTunerProfile(int tunerId)
+    private string PrepareTunerProfile(int tunerId, int debugPort)
     {
         string tunerDir = GetTunerProfilePath(tunerId);
+        KillChromeProcessesForPortOrProfile(debugPort, tunerDir);
         TryDeleteFile(Path.Combine(tunerDir, "SingletonLock"));
 
         if (tunerId == 1)
             return tunerDir;
 
-        string tuner1Dir = GetTunerProfilePath(1);
-        string tuner1Default = Path.Combine(tuner1Dir, "Default");
-        string tunerDefault = Path.Combine(tunerDir, "Default");
+        SyncAuthFromTuner1(tunerId, forceFullSync: false);
+        return tunerDir;
+    }
 
-        string tuner1Cookies = Path.Combine(tuner1Default, "Network", "Cookies");
-        string tuner2Cookies = Path.Combine(tunerDefault, "Network", "Cookies");
+    private void SyncAuthFromTuner1(int targetTunerId, bool forceFullSync)
+    {
+        if (targetTunerId == 1) return;
 
-        bool needsSync = !Directory.Exists(tunerDefault) ||
-                         (File.Exists(tuner1Cookies) && (!File.Exists(tuner2Cookies) ||
-                          File.GetLastWriteTimeUtc(tuner1Cookies) > File.GetLastWriteTimeUtc(tuner2Cookies)));
-
-        if (needsSync && Directory.Exists(tuner1Default))
+        lock (ProfileSyncLock)
         {
-            CopyDirectorySafe(tuner1Default, tunerDefault);
+            string tuner1Dir = GetTunerProfilePath(1);
+            string tuner1Default = Path.Combine(tuner1Dir, "Default");
+            if (!Directory.Exists(tuner1Default))
+                return;
+
+            string targetDir = GetTunerProfilePath(targetTunerId);
+            string targetDefault = Path.Combine(targetDir, "Default");
 
             string localStateSrc = Path.Combine(tuner1Dir, "Local State");
-            string localStateDst = Path.Combine(tunerDir, "Local State");
+            string localStateDst = Path.Combine(targetDir, "Local State");
             if (File.Exists(localStateSrc))
             {
-                try { File.Copy(localStateSrc, localStateDst, overwrite: true); } catch { }
+                CopyFileUnlocked(localStateSrc, localStateDst);
+            }
+
+            string tuner1Cookies = Path.Combine(tuner1Default, "Network", "Cookies");
+            string targetCookies = Path.Combine(targetDefault, "Network", "Cookies");
+
+            bool needsFullSync = forceFullSync ||
+                                 !Directory.Exists(targetDefault) ||
+                                 !File.Exists(targetCookies) ||
+                                 (File.Exists(tuner1Cookies) && File.GetLastWriteTimeUtc(tuner1Cookies) > File.GetLastWriteTimeUtc(targetCookies));
+
+            if (needsFullSync)
+            {
+                CopyDirectorySafe(tuner1Default, targetDefault);
+            }
+            else if (File.Exists(tuner1Cookies))
+            {
+                Directory.CreateDirectory(Path.Combine(targetDefault, "Network"));
+                CopyFileUnlocked(tuner1Cookies, targetCookies);
             }
         }
+    }
 
-        return tunerDir;
+    private static void CopyFileUnlocked(string sourcePath, string destPath)
+    {
+        try
+        {
+            string? dir = Path.GetDirectoryName(destPath);
+            if (!string.IsNullOrEmpty(dir))
+                Directory.CreateDirectory(dir);
+
+            using var src = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var dst = new FileStream(destPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+            src.CopyTo(dst);
+        }
+        catch { }
+    }
+
+    private static void KillChromeProcessesForPortOrProfile(int debugPort, string profileDir)
+    {
+        try
+        {
+            using var cts = new CancellationTokenSource(200);
+            string verJson = Http.GetStringAsync($"http://127.0.0.1:{debugPort}/json/version", cts.Token).GetAwaiter().GetResult();
+            using var verDoc = JsonDocument.Parse(verJson);
+            if (verDoc.RootElement.TryGetProperty("webSocketDebuggerUrl", out var wsProp))
+            {
+                string? wsUrl = wsProp.GetString();
+                if (!string.IsNullOrWhiteSpace(wsUrl))
+                {
+                    using var ws = new ClientWebSocket();
+                    ws.ConnectAsync(new Uri(wsUrl), cts.Token).GetAwaiter().GetResult();
+                    SendCdpCommandAsync(ws, 1, "Browser.close", new { }, cts.Token).GetAwaiter().GetResult();
+                    Thread.Sleep(120);
+                }
+            }
+        }
+        catch { }
     }
 
     private static void TryDeleteFile(string path)
@@ -853,21 +893,18 @@ public sealed class ChromeTuner
             string fileName = Path.GetFileName(file);
             if (fileName.StartsWith("LOCK", StringComparison.OrdinalIgnoreCase) ||
                 fileName.EndsWith("-journal", StringComparison.OrdinalIgnoreCase) ||
-                fileName.EndsWith(".log", StringComparison.OrdinalIgnoreCase))
+                fileName.EndsWith(".log", StringComparison.OrdinalIgnoreCase) ||
+                fileName.StartsWith("Singleton", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
-            try
-            {
-                File.Copy(file, Path.Combine(targetDir, fileName), overwrite: true);
-            }
-            catch { }
+            CopyFileUnlocked(file, Path.Combine(targetDir, fileName));
         }
 
         foreach (string subDir in Directory.GetDirectories(sourceDir))
         {
             string dirName = Path.GetFileName(subDir);
-            if (dirName is "Cache" or "Code Cache" or "GPUCache" or "Service Worker" or "Sessions" or "Session Storage")
+            if (dirName is "Cache" or "Code Cache" or "GPUCache" or "Service Worker" or "Sessions" or "Session Storage" or "DawnCache" or "GrShaderCache" or "ShaderCache")
                 continue;
             CopyDirectorySafe(subDir, Path.Combine(targetDir, dirName));
         }
@@ -905,26 +942,36 @@ public sealed class ChromeTuner
     {
         ShowWindow(hwnd, SW_RESTORE);
 
+        int exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
+        exStyle &= ~(WS_EX_LAYERED | WS_EX_TRANSPARENT);
+
         if (_config.WindowPlacement == WindowPlacementMode.VisibleDebug)
         {
-            int debugStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-            SetWindowLong(hwnd, GWL_EXSTYLE, debugStyle & ~(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW));
+            SetWindowLong(hwnd, GWL_EXSTYLE, exStyle & ~WS_EX_TOOLWINDOW);
             SetWindowPos(hwnd, IntPtr.Zero, 50, 50, WindowWidth, WindowHeight, SWP_NOACTIVATE | SWP_NOZORDER);
             return;
         }
 
+        SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
+
+        int targetX, targetY;
         if (_config.WindowPlacement == WindowPlacementMode.CustomCoordinates)
         {
-            int customStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-            SetWindowLong(hwnd, GWL_EXSTYLE, customStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE);
-            SetWindowPos(hwnd, HWND_BOTTOM, _config.CustomX, _config.CustomY, WindowWidth, WindowHeight, SWP_NOACTIVATE);
-            return;
+            targetX = _config.CustomX;
+            targetY = _config.CustomY;
+        }
+        else
+        {
+            int virtualLeft = GetSystemMetrics(SM_XVIRTUALSCREEN);
+            int virtualTop = GetSystemMetrics(SM_YVIRTUALSCREEN);
+            int virtualWidth = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+            int virtualHeight = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+            targetX = (virtualLeft + virtualWidth) - 8;
+            targetY = (virtualTop + virtualHeight) - 8;
         }
 
-        int exStyle = GetWindowLong(hwnd, GWL_EXSTYLE);
-        SetWindowLong(hwnd, GWL_EXSTYLE, exStyle | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED | WS_EX_TRANSPARENT);
-        SetLayeredWindowAttributes(hwnd, 0, 1, LWA_ALPHA);
-        SetWindowPos(hwnd, HWND_BOTTOM, 0, 0, WindowWidth, WindowHeight, SWP_NOACTIVATE);
+        SetWindowPos(hwnd, HWND_BOTTOM, targetX, targetY, WindowWidth, WindowHeight, SWP_NOACTIVATE);
     }
 
     #region Win32 Interop
@@ -941,13 +988,13 @@ public sealed class ChromeTuner
     private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 
     [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int nIndex);
+
+    [DllImport("user32.dll")]
     private static extern int GetWindowLong(IntPtr hWnd, int nIndex);
 
     [DllImport("user32.dll")]
     private static extern int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
-
-    [DllImport("user32.dll")]
-    private static extern bool SetLayeredWindowAttributes(IntPtr hwnd, uint crKey, byte bAlpha, uint dwFlags);
 
     [DllImport("user32.dll")]
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
@@ -955,12 +1002,16 @@ public sealed class ChromeTuner
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 
+    private const int SM_XVIRTUALSCREEN = 76;
+    private const int SM_YVIRTUALSCREEN = 77;
+    private const int SM_CXVIRTUALSCREEN = 78;
+    private const int SM_CYVIRTUALSCREEN = 79;
+
     private const int GWL_EXSTYLE = -20;
     private const int WS_EX_TRANSPARENT = 0x00000020;
     private const int WS_EX_TOOLWINDOW = 0x00000080;
     private const int WS_EX_LAYERED = 0x00080000;
     private const int WS_EX_NOACTIVATE = 0x08000000;
-    private const uint LWA_ALPHA = 0x00000002;
 
     private const int SW_RESTORE = 9;
     private static readonly IntPtr HWND_BOTTOM = new(1);
