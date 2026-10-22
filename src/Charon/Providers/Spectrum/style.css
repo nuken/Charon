@@ -1,0 +1,25 @@
+﻿html, body {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+  background: #000 !important;
+  cursor: none !important;
+}
+video {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  object-fit: contain !important;
+  z-index: 2147483647 !important;
+  background: #000 !important;
+}
+header, nav, footer, .site-header, .player-controls, .control-bar, .mini-guide,
+[class*="controlBar"], [class*="overlay"], [class*="header"], [class*="guide"] {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

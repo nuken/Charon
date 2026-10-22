@@ -22,6 +22,10 @@ public class CharonConfig
     public string VideoEncoder { get; set; } = "h264_nvenc"; // h264_nvenc, h264_qsv, h264_amf, libx264
     public string VideoBitrate { get; set; } = "8M";
     public int MaxConcurrentTuners { get; set; } = 2;
+
+    // Saved Channels DVR Server settings for Gracenote StationId resolution (blank on first run)
+    public string ChannelsDvrIp { get; set; } = string.Empty;
+    public int ChannelsDvrPort { get; set; } = 8089;
     
     [JsonConverter(typeof(JsonStringEnumConverter))]
     public WindowPlacementMode WindowPlacement { get; set; } = WindowPlacementMode.AutoOffScreen;
@@ -93,7 +97,6 @@ public class CharonConfig
     {
         try
         {
-            // Connect a UDP socket (doesn't send packets) to determine the preferred outbound LAN interface
             using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, 0);
             socket.Connect("8.8.8.8", 65530);
             if (socket.LocalEndPoint is IPEndPoint endPoint)
@@ -103,7 +106,6 @@ public class CharonConfig
         }
         catch
         {
-            // Fallback: scan active network interfaces
             foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
             {
                 if (ni.OperationalStatus != OperationalStatus.Up ||
@@ -140,7 +142,6 @@ public class CharonConfig
             }
             catch
             {
-                // Port is reserved by WinNAT / OS; try the next one up
             }
         }
 

@@ -415,6 +415,96 @@ public partial class MainWindow : Window
         AppendLog("[Auth] Sign in to your account, verify video plays, and then close that Chrome window to sync your session across all 4 tuners.");
         _tuner.LaunchInteractiveLogin(provider.Manifest.LoginUrl, AppendLog);
     }
+	
+	private async void BtnScanLineup_Click(object sender, RoutedEventArgs e)
+    {
+        var provider = GetSelectedProvider();
+        if (provider is null)
+        {
+            MessageBox.Show("Please select a provider first.", "No Provider", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        bool isSpectrum = provider.Manifest.Id.Contains("spectrum", StringComparison.OrdinalIgnoreCase);
+
+        if (isSpectrum)
+        {
+            var confirm = MessageBox.Show(
+                "Channels DVR Gracenote lookup is not needed for Spectrum TV because Spectrum provides native Gracenote Station IDs (tmsid) directly in its channel lineup.\n\n" +
+                "Would you like Charon to scan your logged-in Spectrum account now and build channels.json automatically?",
+                "Spectrum TV Lineup Scan",
+                MessageBoxButton.YesNo,
+                MessageBoxImage.Information);
+
+            if (confirm != MessageBoxResult.Yes)
+                return;
+        }
+        else
+        {
+            var dvrDialog = new DvrIpDialog(_config.ChannelsDvrIp, _config.ChannelsDvrPort)
+            {
+                Owner = this
+            };
+
+            if (dvrDialog.ShowDialog() != true)
+                return;
+
+            _config.ChannelsDvrIp = dvrDialog.DvrIp;
+            _config.ChannelsDvrPort = dvrDialog.DvrPort;
+            _config.Save();
+        }
+
+        try
+        {
+            string busyMsg = isSpectrum
+                ? $"Scanning {provider.Manifest.Name} lineup (native tmsid included)..."
+                : $"Scanning {provider.Manifest.Name} lineup and matching Gracenote IDs...";
+
+            SetBusyState(true, busyMsg);
+
+            var (channels, matchedCount) = await ChannelSyncService.ScanAndMatchAsync(
+                _config,
+                provider,
+                _config.ChannelsDvrIp,
+                _config.ChannelsDvrPort,
+                AppendLog,
+                status => Dispatcher.InvokeAsync(() => TxtBusyStatus.Text = status));
+
+            string savedPath = _providers.SaveProviderChannels(provider, channels);
+            RefreshProviderDropdown();
+
+            AppendLog($"[Sync] Complete! Saved {channels.Count} channels ({matchedCount} Gracenote IDs) to {savedPath}");
+            MessageBox.Show(
+                $"Scan & Sync Complete!\n\n" +
+                $"• Scraped Channels: {channels.Count}\n" +
+                $"• Gracenote Station IDs: {matchedCount} / {channels.Count}\n" +
+                $"• Saved To: {savedPath}\n\n" +
+                $"Your Channels DVR M3U playlist is ready!",
+                "Lineup Sync Complete",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[Sync] ERROR: {ex.Message}");
+            MessageBox.Show($"Channel scan failed:\n\n{ex.Message}", "Lineup Sync Error", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            SetBusyState(false, string.Empty);
+        }
+    }
+	
+    private void SetBusyState(bool isBusy, string statusText)
+    {
+        BusyBanner.Visibility = isBusy ? Visibility.Visible : Visibility.Collapsed;
+        TxtBusyStatus.Text = statusText;
+        BtnScanLineup.IsEnabled = !isBusy;
+        BtnLoginProvider.IsEnabled = !isBusy;
+        BtnReloadProviders.IsEnabled = !isBusy;
+        CmbProviders.IsEnabled = !isBusy;
+        System.Windows.Input.Mouse.OverrideCursor = isBusy ? System.Windows.Input.Cursors.Wait : null;
+    }
 
     private void BtnReloadProviders_Click(object sender, RoutedEventArgs e)
     {

@@ -60,12 +60,16 @@ public class ProviderManager
         _providers.Clear();
         Directory.CreateDirectory(_providersRoot);
 
+        // Ensure both default provider directories exist out of the box
+        string defaultYttvDir = Path.Combine(_providersRoot, "YouTubeTV");
+        string defaultSpectrumDir = Path.Combine(_providersRoot, "Spectrum");
+        Directory.CreateDirectory(defaultYttvDir);
+        Directory.CreateDirectory(defaultSpectrumDir);
+
         // If someone placed channels.json directly in Providers\ root instead of Providers\YouTubeTV\, move/copy it into Providers\YouTubeTV\
         string rootChannelsFile = Path.Combine(_providersRoot, "channels.json");
-        string defaultYttvDir = Path.Combine(_providersRoot, "YouTubeTV");
         if (File.Exists(rootChannelsFile))
         {
-            Directory.CreateDirectory(defaultYttvDir);
             string targetYttvChannels = Path.Combine(defaultYttvDir, "channels.json");
             if (!File.Exists(targetYttvChannels))
                 File.Copy(rootChannelsFile, targetYttvChannels);
@@ -76,21 +80,23 @@ public class ProviderManager
         {
             LoadOrRepairProviderDirectory(dir);
         }
-
-        // Guarantee at least YouTubeTV exists and is loaded if no valid providers were found
-        if (_providers.Count == 0)
-        {
-            Directory.CreateDirectory(defaultYttvDir);
-            LoadOrRepairProviderDirectory(defaultYttvDir);
-        }
     }
 
     private void LoadOrRepairProviderDirectory(string dir)
     {
         string folderName = Path.GetFileName(dir);
+        bool isYttv = folderName.Equals("YouTubeTV", StringComparison.OrdinalIgnoreCase);
+        bool isSpectrum = folderName.Equals("Spectrum", StringComparison.OrdinalIgnoreCase);
+
         string manifestPath = Path.Combine(dir, "provider.json");
         string altManifestPath = Path.Combine(dir, "manifest.json");
         string channelsPath = Path.Combine(dir, "channels.json");
+        string tuneJsPath = Path.Combine(dir, "tune.js");
+        string styleCssPath = Path.Combine(dir, "style.css");
+
+        string defaultName = isYttv ? "YouTube TV" : isSpectrum ? "Spectrum TV" : folderName;
+        string defaultLoginUrl = isSpectrum ? "https://watch.spectrum.net/guide" : "https://tv.youtube.com";
+        int defaultDelayMs = isSpectrum ? 2000 : 1500;
 
         // Support manifest.json if present, or auto-create provider.json if missing!
         if (!File.Exists(manifestPath) && File.Exists(altManifestPath))
@@ -102,11 +108,11 @@ public class ProviderManager
             var autoManifest = new ProviderManifest
             {
                 Id = folderName.ToLowerInvariant(),
-                Name = folderName.Equals("YouTubeTV", StringComparison.OrdinalIgnoreCase) ? "YouTube TV" : folderName,
-                GroupTitle = folderName.Equals("YouTubeTV", StringComparison.OrdinalIgnoreCase) ? "YouTube TV" : folderName,
+                Name = defaultName,
+                GroupTitle = defaultName,
                 Enabled = true,
-                LoginUrl = "https://tv.youtube.com",
-                TuneScriptDelayMs = 1500
+                LoginUrl = defaultLoginUrl,
+                TuneScriptDelayMs = defaultDelayMs
             };
             File.WriteAllText(manifestPath, JsonSerializer.Serialize(autoManifest, JsonOptions), new UTF8Encoding(false));
         }
@@ -114,6 +120,59 @@ public class ProviderManager
         if (!File.Exists(channelsPath))
         {
             File.WriteAllText(channelsPath, "[]", new UTF8Encoding(false));
+        }
+
+        // Auto-create Spectrum's tune.js and style.css if missing
+        if (isSpectrum)
+        {
+            if (!File.Exists(tuneJsPath))
+            {
+                const string spectrumTuneJs = """
+                    (function() {
+                      const v = document.querySelector('video');
+                      if (v) {
+                        v.muted = false;
+                        v.volume = 1.0;
+                        if (v.paused) {
+                          v.play().catch(() => {});
+                        }
+                      }
+                    })();
+                    """;
+                File.WriteAllText(tuneJsPath, spectrumTuneJs, new UTF8Encoding(false));
+            }
+
+            if (!File.Exists(styleCssPath))
+            {
+                const string spectrumStyleCss = """
+                    html, body {
+                      margin: 0 !important;
+                      padding: 0 !important;
+                      width: 100vw !important;
+                      height: 100vh !important;
+                      overflow: hidden !important;
+                      background: #000 !important;
+                      cursor: none !important;
+                    }
+                    video {
+                      position: fixed !important;
+                      top: 0 !important;
+                      left: 0 !important;
+                      width: 100vw !important;
+                      height: 100vh !important;
+                      object-fit: contain !important;
+                      z-index: 2147483647 !important;
+                      background: #000 !important;
+                    }
+                    header, nav, footer, .site-header, .player-controls, .control-bar, .mini-guide,
+                    [class*="controlBar"], [class*="overlay"], [class*="header"], [class*="guide"] {
+                      display: none !important;
+                      opacity: 0 !important;
+                      pointer-events: none !important;
+                    }
+                    """;
+                File.WriteAllText(styleCssPath, spectrumStyleCss, new UTF8Encoding(false));
+            }
         }
 
         ProviderManifest? manifest = null;
@@ -128,11 +187,11 @@ public class ProviderManager
             manifest = new ProviderManifest
             {
                 Id = folderName.ToLowerInvariant(),
-                Name = folderName.Equals("YouTubeTV", StringComparison.OrdinalIgnoreCase) ? "YouTube TV" : folderName,
-                GroupTitle = folderName.Equals("YouTubeTV", StringComparison.OrdinalIgnoreCase) ? "YouTube TV" : folderName,
+                Name = defaultName,
+                GroupTitle = defaultName,
                 Enabled = true,
-                LoginUrl = "https://tv.youtube.com",
-                TuneScriptDelayMs = 1500
+                LoginUrl = defaultLoginUrl,
+                TuneScriptDelayMs = defaultDelayMs
             };
             File.WriteAllText(manifestPath, JsonSerializer.Serialize(manifest, JsonOptions), new UTF8Encoding(false));
         }
@@ -143,9 +202,6 @@ public class ProviderManager
             channels = JsonSerializer.Deserialize<List<ProviderChannel>>(File.ReadAllText(channelsPath), JsonOptions) ?? [];
         }
         catch { }
-
-        string tuneJsPath = Path.Combine(dir, "tune.js");
-        string styleCssPath = Path.Combine(dir, "style.css");
 
         _providers.Add(new LoadedProvider
         {

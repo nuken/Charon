@@ -100,7 +100,7 @@ public sealed class ChromeTuner
         int wsPort = 48700 + tunerId;
         string tunerProfile = PrepareTunerProfile(tunerId, debugPort);
 
-        (string extDir, string extensionId) = EnsureTabCaptureExtension(tunerId, wsPort, provider);
+        (string extDir, string extensionId, string extVersion) = EnsureTabCaptureExtension(tunerId, wsPort, provider);
 
         using var httpListener = new HttpListener();
         httpListener.Prefixes.Add($"http://127.0.0.1:{wsPort}/");
@@ -139,7 +139,7 @@ public sealed class ChromeTuner
             "--no-default-browser-check"
         ]);
 
-        logCallback?.Invoke($"[Tuner {tunerId}] Launching Chrome (V21 Fast-Tune) for {provider.Manifest.Name} -> {channel.Name}...");
+        logCallback?.Invoke($"[Tuner {tunerId}] Launching Chrome (Ext v{extVersion}) for {provider.Manifest.Name} -> {channel.Name}...");
 
         using var chromeProcess = Process.Start(new ProcessStartInfo
         {
@@ -508,10 +508,31 @@ public sealed class ChromeTuner
         await ws.SendAsync(bytes, WebSocketMessageType.Text, true, ct);
     }
 
-    private static (string ExtDir, string ExtensionId) EnsureTabCaptureExtension(int tunerId, int wsPort, LoadedProvider provider)
+    private (string ExtDir, string ExtensionId, string ExtVersion) EnsureTabCaptureExtension(int tunerId, int wsPort, LoadedProvider provider)
     {
         string baseExtDir = Path.Combine(AppContext.BaseDirectory, "TabCaptureExt");
         Directory.CreateDirectory(baseExtDir);
+
+        // Derive a dynamic 4-part Chrome extension version from Charon.exe's build timestamp
+        // so Chrome automatically invalidates any cached Service Worker script on every build/upgrade without touching logins!
+        string exePath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "Charon.exe");
+        DateTime buildUtc = File.Exists(exePath) ? File.GetLastWriteTimeUtc(exePath) : DateTime.UtcNow;
+        string extVersion = $"22.{buildUtc.Month * 100 + buildUtc.Day}.{buildUtc.Hour * 100 + buildUtc.Minute}.{buildUtc.Second}";
+
+        // Purge only the Service Worker ScriptCache (never Cookies or Local Storage!) once when Charon.exe changes
+        string versionMarker = Path.Combine(baseExtDir, "ext_build_version.txt");
+        if (!File.Exists(versionMarker) || File.ReadAllText(versionMarker).Trim() != extVersion)
+        {
+            for (int id = 1; id <= 4; id++)
+            {
+                string swScriptCache = Path.Combine(GetTunerProfilePath(id), "Default", "Service Worker", "ScriptCache");
+                if (Directory.Exists(swScriptCache))
+                {
+                    try { Directory.Delete(swScriptCache, recursive: true); } catch { }
+                }
+            }
+            try { File.WriteAllText(versionMarker, extVersion); } catch { }
+        }
 
         string keyFile = Path.Combine(baseExtDir, "rsa_spki_v20.b64");
         byte[] spkiBytes;
@@ -542,8 +563,8 @@ public sealed class ChromeTuner
         string manifestJson = $$"""
         {
           "manifest_version": 3,
-          "name": "Charon V21 Bulletproof TabCapture Bridge",
-          "version": "20.0.0",
+          "name": "Charon TabCapture Bridge",
+          "version": "{{extVersion}}",
           "key": "{{publicKeyBase64}}",
           "permissions": [
             "tabCapture",
@@ -589,7 +610,6 @@ public sealed class ChromeTuner
         }
         File.WriteAllText(Path.Combine(extDir, "main_world.js"), mainWorldBuilder.ToString());
 
-        // Only fire PAGE_COMMITTED once the real http/https document has committed (never on the initial about:blank placeholder!)
         const string notifyLifecycleJs = """
         (function() {
           if (window.__charonLifecycleNotifier) return;
@@ -601,11 +621,8 @@ public sealed class ChromeTuner
         """;
         File.WriteAllText(Path.Combine(extDir, "content.js"), notifyLifecycleJs);
 
-        // V21 BULLETPROOF HANDSHAKE:
-        // 1. Waits until the tab has committed to http/https (or 350ms after service worker start) so we NEVER capture the dying about:blank process!
-        // 2. Uses a continuous retry loop between background.js and offscreen.js until STREAM_LOCKED_OK is confirmed!
         string backgroundJs = $$"""
-        const log = (msg) => fetch('http://127.0.0.1:{{wsPort}}/log?msg=' + encodeURIComponent('BG_V21: ' + msg)).catch(() => {});
+        const log = (msg) => fetch('http://127.0.0.1:{{wsPort}}/log?msg=' + encodeURIComponent('BG_v{{extVersion}}: ' + msg)).catch(() => {});
         log('Service worker started');
 
         let streamLocked = false;
@@ -733,7 +750,6 @@ public sealed class ChromeTuner
               }
             });
 
-            // Tell background.js that getUserMedia succeeded so it stops polling!
             chrome.runtime.sendMessage({ type: 'STREAM_LOCKED_OK' }).catch(() => {});
 
             const videoTrack = stream.getVideoTracks()[0];
@@ -753,6 +769,7 @@ public sealed class ChromeTuner
                 'video/webm'
               ];
               const mimeType = mimeTypes.find((t) => MediaRecorder.isTypeSupported(t)) || 'video/webm';
+              log('Selected MediaRecorder codec profile: ' + mimeType);
 
               activeRecorder = new MediaRecorder(stream, {
                 mimeType: mimeType,
@@ -777,12 +794,11 @@ public sealed class ChromeTuner
           }
         });
 
-        // Notify background.js as soon as our message listener is registered!
         chrome.runtime.sendMessage({ type: 'OFFSCREEN_READY' }).catch(() => {});
         """;
         File.WriteAllText(Path.Combine(extDir, "offscreen.js"), offscreenJs);
 
-        return (extDir, extensionId);
+        return (extDir, extensionId, extVersion);
     }
 
     private string PrepareTunerProfile(int tunerId, int debugPort)
@@ -831,10 +847,21 @@ public sealed class ChromeTuner
             {
                 CopyDirectorySafe(tuner1Default, targetDefault);
             }
-            else if (File.Exists(tuner1Cookies))
+            else
             {
-                Directory.CreateDirectory(Path.Combine(targetDefault, "Network"));
-                CopyFileUnlocked(tuner1Cookies, targetCookies);
+                if (File.Exists(tuner1Cookies))
+                {
+                    Directory.CreateDirectory(Path.Combine(targetDefault, "Network"));
+                    CopyFileUnlocked(tuner1Cookies, targetCookies);
+                }
+
+                // Also keep Local Storage synced on every tune so Spectrum's oauth_token stays fresh across Tuners 2–4
+                string tuner1LocalStorage = Path.Combine(tuner1Default, "Local Storage", "leveldb");
+                string targetLocalStorage = Path.Combine(targetDefault, "Local Storage", "leveldb");
+                if (Directory.Exists(tuner1LocalStorage))
+                {
+                    CopyDirectorySafe(tuner1LocalStorage, targetLocalStorage);
+                }
             }
         }
     }
