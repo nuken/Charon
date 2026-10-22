@@ -557,6 +557,14 @@ public partial class MainWindow : Window
         Dispatcher.InvokeAsync(() =>
         {
             TxtLogs.AppendText($"[{DateTime.Now:HH:mm:ss}] {message}{Environment.NewLine}");
+
+            // Limit the log to roughly 100,000 characters to prevent memory leaks during long uptimes
+            if (TxtLogs.Text.Length > 100000)
+            {
+                // Drop the oldest ~20,000 characters when the limit is reached
+                TxtLogs.Text = TxtLogs.Text.Substring(20000);
+            }
+
             TxtLogs.ScrollToEnd();
         });
     }
