@@ -18,7 +18,6 @@ public sealed class ChromeTuner
     private static readonly HttpClient Http = new();
     private static readonly object ProfileSyncLock = new();
 
-    // 1280x752 in --app mode = 32px Windows title bar + exact 1280x720 (16:9) client viewport
     private const int WindowWidth = 1280;
     private const int WindowHeight = 752;
 
@@ -50,6 +49,8 @@ public sealed class ChromeTuner
                 "--no-default-browser-check",
                 "--autoplay-policy=no-user-gesture-required",
                 "--disable-features=HardwareMediaKeyHandling,MediaSessionService,Translate",
+                "--window-position=50,50",     // <-- Forces login window onto your main screen
+                "--window-size=1280,800",       // <-- Sets a clean, comfortable login window size
                 $"\"{loginUrl}\""
             ]),
             UseShellExecute = false
@@ -336,12 +337,6 @@ public sealed class ChromeTuner
             if (hwnd != IntPtr.Zero)
             {
                 ApplyWindowPlacement(hwnd);
-                for (int i = 0; i < 6; i++)
-                {
-                    if (ct.IsCancellationRequested) break;
-                    await Task.Delay(400, ct);
-                    ApplyWindowPlacement(hwnd);
-                }
             }
         }, ct);
 
@@ -365,11 +360,12 @@ public sealed class ChromeTuner
                 await Task.Delay(15, ct);
             }
 
+            // Wait for Chrome's response to Extensions.loadUnpacked before closing the socket!
             if (!string.IsNullOrWhiteSpace(browserWsUrl))
             {
                 using var bws = new ClientWebSocket();
                 await bws.ConnectAsync(new Uri(browserWsUrl), ct);
-                await SendCdpCommandAsync(bws, 1, "Extensions.loadUnpacked", new { path = extDir }, ct);
+                await SendCdpCommandAndWaitAsync(bws, 1, "Extensions.loadUnpacked", new { path = extDir }, ct);
             }
 
             string? pageWsUrl = null;
@@ -402,9 +398,31 @@ public sealed class ChromeTuner
                 await SendCdpCommandAsync(ws, 1, "Page.enable", new { }, ct);
                 await SendCdpCommandAsync(ws, 2, "Emulation.setFocusEmulationEnabled", new { enabled = true }, ct);
 
+                // Lock the viewport to exact 1280x720 (16:9) with zero border!
+                await SendCdpCommandAsync(ws, 3, "Emulation.setDeviceMetricsOverride", new
+                {
+                    width = 1280,
+                    height = 720,
+                    deviceScaleFactor = 1,
+                    mobile = false
+                }, ct);
+
+                // Combine fresh StyleCss + TuneJs so CDP always injects the latest CSS even if Chrome cached main_world.js!
+                var cdpScriptBuilder = new StringBuilder();
+                if (!string.IsNullOrWhiteSpace(provider.StyleCss))
+                {
+                    string escapedCss = JsonEncodedText.Encode(provider.StyleCss).ToString();
+                    cdpScriptBuilder.AppendLine($"(function(){{ if (location.pathname.startsWith('/live')) return; let s = document.getElementById('charon-css'); if (!s && (document.head || document.documentElement)) {{ s = document.createElement('style'); s.id = 'charon-css'; (document.head || document.documentElement).appendChild(s); }} if (s && s.textContent !== \"{escapedCss}\") s.textContent = \"{escapedCss}\"; }})();");
+                }
                 if (!string.IsNullOrWhiteSpace(provider.TuneJs))
                 {
-                    await SendCdpCommandAsync(ws, 3, "Page.addScriptToEvaluateOnNewDocument", new { source = provider.TuneJs }, ct);
+                    cdpScriptBuilder.AppendLine(provider.TuneJs);
+                }
+                string combinedCdpScript = cdpScriptBuilder.ToString();
+
+                if (!string.IsNullOrWhiteSpace(combinedCdpScript))
+                {
+                    await SendCdpCommandAsync(ws, 4, "Page.addScriptToEvaluateOnNewDocument", new { source = combinedCdpScript }, ct);
                 }
 
                 int msgId = 10;
@@ -413,11 +431,11 @@ public sealed class ChromeTuner
                     ct.ThrowIfCancellationRequested();
                     await Task.Delay(350, ct);
 
-                    if (!string.IsNullOrWhiteSpace(provider.TuneJs))
+                    if (!string.IsNullOrWhiteSpace(combinedCdpScript))
                     {
                         await SendCdpCommandAsync(ws, msgId++, "Runtime.evaluate", new
                         {
-                            expression = provider.TuneJs,
+                            expression = combinedCdpScript,
                             userGesture = true
                         }, ct);
                     }
@@ -448,6 +466,10 @@ public sealed class ChromeTuner
                         }
                     }
                 }
+
+                // CRITICAL: Keep the CDP WebSocket open for the entire lifetime of the stream!
+                // If 'ws' disposes early, Chrome automatically reverts Emulation.setDeviceMetricsOverride and bounces back to a border!
+                await Task.Delay(Timeout.Infinite, ct);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -508,31 +530,36 @@ public sealed class ChromeTuner
         await ws.SendAsync(bytes, WebSocketMessageType.Text, true, ct);
     }
 
+    private static async Task SendCdpCommandAndWaitAsync(ClientWebSocket ws, int id, string method, object parameters, CancellationToken ct)
+    {
+        await SendCdpCommandAsync(ws, id, method, parameters, ct);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(3000);
+        byte[] buf = new byte[8192];
+
+        try
+        {
+            while (ws.State == WebSocketState.Open)
+            {
+                var res = await ws.ReceiveAsync(buf, timeoutCts.Token);
+                if (res.MessageType == WebSocketMessageType.Close) break;
+                string json = Encoding.UTF8.GetString(buf, 0, res.Count);
+                if (json.Contains($"\"id\":{id}", StringComparison.Ordinal))
+                    break;
+            }
+        }
+        catch { }
+    }
+
     private (string ExtDir, string ExtensionId, string ExtVersion) EnsureTabCaptureExtension(int tunerId, int wsPort, LoadedProvider provider)
     {
         string baseExtDir = Path.Combine(AppContext.BaseDirectory, "TabCaptureExt");
         Directory.CreateDirectory(baseExtDir);
 
-        // Derive a dynamic 4-part Chrome extension version from Charon.exe's build timestamp
-        // so Chrome automatically invalidates any cached Service Worker script on every build/upgrade without touching logins!
         string exePath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "Charon.exe");
         DateTime buildUtc = File.Exists(exePath) ? File.GetLastWriteTimeUtc(exePath) : DateTime.UtcNow;
         string extVersion = $"22.{buildUtc.Month * 100 + buildUtc.Day}.{buildUtc.Hour * 100 + buildUtc.Minute}.{buildUtc.Second}";
-
-        // Purge only the Service Worker ScriptCache (never Cookies or Local Storage!) once when Charon.exe changes
-        string versionMarker = Path.Combine(baseExtDir, "ext_build_version.txt");
-        if (!File.Exists(versionMarker) || File.ReadAllText(versionMarker).Trim() != extVersion)
-        {
-            for (int id = 1; id <= 4; id++)
-            {
-                string swScriptCache = Path.Combine(GetTunerProfilePath(id), "Default", "Service Worker", "ScriptCache");
-                if (Directory.Exists(swScriptCache))
-                {
-                    try { Directory.Delete(swScriptCache, recursive: true); } catch { }
-                }
-            }
-            try { File.WriteAllText(versionMarker, extVersion); } catch { }
-        }
 
         string keyFile = Path.Combine(baseExtDir, "rsa_spki_v20.b64");
         byte[] spkiBytes;
@@ -602,7 +629,7 @@ public sealed class ChromeTuner
         if (!string.IsNullOrWhiteSpace(provider.StyleCss))
         {
             string escapedCss = JsonEncodedText.Encode(provider.StyleCss).ToString();
-            mainWorldBuilder.AppendLine($"(function(){{ const inject = () => {{ if (!document.getElementById('charon-css') && (document.head || document.documentElement)) {{ const s = document.createElement('style'); s.id = 'charon-css'; s.textContent = \"{escapedCss}\"; (document.head || document.documentElement).appendChild(s); }} }}; inject(); document.addEventListener('DOMContentLoaded', inject); }})();");
+            mainWorldBuilder.AppendLine($"(function(){{ const inject = () => {{ if (location.pathname.startsWith('/live')) return; if (!document.getElementById('charon-css') && (document.head || document.documentElement)) {{ const s = document.createElement('style'); s.id = 'charon-css'; s.textContent = \"{escapedCss}\"; (document.head || document.documentElement).appendChild(s); }} }}; inject(); document.addEventListener('DOMContentLoaded', inject); }})();");
         }
         if (!string.IsNullOrWhiteSpace(provider.TuneJs))
         {
@@ -855,7 +882,6 @@ public sealed class ChromeTuner
                     CopyFileUnlocked(tuner1Cookies, targetCookies);
                 }
 
-                // Also keep Local Storage synced on every tune so Spectrum's oauth_token stays fresh across Tuners 2–4
                 string tuner1LocalStorage = Path.Combine(tuner1Default, "Local Storage", "leveldb");
                 string targetLocalStorage = Path.Combine(targetDefault, "Local Storage", "leveldb");
                 if (Directory.Exists(tuner1LocalStorage))
@@ -1003,6 +1029,15 @@ public sealed class ChromeTuner
 
     #region Win32 Interop
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
     private delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 
     [DllImport("user32.dll")]
@@ -1028,6 +1063,12 @@ public sealed class ChromeTuner
 
     [DllImport("user32.dll")]
     private static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+    [DllImport("user32.dll")]
+    private static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
 
     private const int SM_XVIRTUALSCREEN = 76;
     private const int SM_YVIRTUALSCREEN = 77;

@@ -51,28 +51,29 @@ public class ChannelSyncService
         Action<string> log,
         Action<string> statusCallback)
     {
-        // Locate the exact Profiles directory that ChromeTuner uses
         string baseProfilesDir = ResolveExistingProfilesRoot();
         string selectedProfile = SelectUnlockedAuthenticatedProfile(baseProfilesDir, log);
 
         log($"[Sync] Using authenticated Chrome profile: {selectedProfile}");
 
         int cdpPort = FindFreeLoopbackPort(9330);
-        string targetUrl = provider.Manifest.Id.Contains("spectrum", StringComparison.OrdinalIgnoreCase)
+        bool isSpectrum = provider.Manifest.Id.Contains("spectrum", StringComparison.OrdinalIgnoreCase);
+        string targetUrl = isSpectrum
             ? "https://watch.spectrum.net/guide"
             : "https://tv.youtube.com/live";
 
         int posX = config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : -3200;
         int posY = config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : 0;
 
-        // Match ChromeTuner's exact launch flags so Chrome never invalidates the session cookies
+        // Add --disable-extensions during lineup scan so TabCaptureExt CSS/scripts never lock the guide grid!
         string args = string.Join(" ",
         [
             $"--user-data-dir=\"{selectedProfile}\"",
             $"--remote-debugging-port={cdpPort}",
             "--remote-allow-origins=*",
+            "--disable-extensions",
             $"--window-position={posX},{posY}",
-            "--window-size=1280,900",
+            "--window-size=1280,1000",
             "--no-first-run",
             "--no-default-browser-check",
             "--disable-blink-features=AutomationControlled",
@@ -103,41 +104,121 @@ public class ChannelSyncService
             using var ws = new ClientWebSocket();
             await ws.ConnectAsync(new Uri(wsUrl), CancellationToken.None);
 
-            string jsScraper = provider.Manifest.Id.Contains("spectrum", StringComparison.OrdinalIgnoreCase)
-                ? GetSpectrumScraperJs()
-                : GetYouTubeTvScraperJs();
-
-            // Poll up to 30 seconds for the live guide grid to finish rendering
-            var deadline = DateTime.UtcNow.AddSeconds(30);
-            int attempt = 0;
-
-            while (DateTime.UtcNow < deadline)
+            if (isSpectrum)
             {
-                attempt++;
-                statusCallback($"Step 1/2: Waiting for {provider.Manifest.Name} guide grid to load (attempt {attempt})...");
+                string spectrumJs = GetSpectrumScraperJs();
+                var deadline = DateTime.UtcNow.AddSeconds(30);
+                int attempt = 0;
 
-                string? jsonResult = await EvaluateJsStringAsync(ws, attempt, jsScraper);
-                if (!string.IsNullOrWhiteSpace(jsonResult))
+                while (DateTime.UtcNow < deadline)
                 {
-                    // Check if the script returned a diagnostic status object instead of the channel array
-                    if (jsonResult.StartsWith("{\"status\":", StringComparison.Ordinal))
-                    {
-                        log($"[Sync] Attempt {attempt}: {jsonResult}");
-                    }
-                    else if (jsonResult.StartsWith("[", StringComparison.Ordinal) && jsonResult != "[]")
+                    attempt++;
+                    statusCallback($"Step 1/2: Waiting for {provider.Manifest.Name} guide to load (attempt {attempt})...");
+                    string? jsonResult = await EvaluateJsStringAsync(ws, attempt, spectrumJs);
+                    if (!string.IsNullOrWhiteSpace(jsonResult) && jsonResult.StartsWith("[", StringComparison.Ordinal) && jsonResult != "[]")
                     {
                         var parsed = ProviderManager.ParseChannelsJson(jsonResult);
-                        if (parsed.Count > 0)
+                        if (parsed.Count > 0) return parsed;
+                    }
+                    await Task.Delay(1500);
+                }
+                return [];
+            }
+            else
+            {
+                // YouTube TV: Wait for initial guide grid, then scroll using real CDP hardware mouseWheel events
+                var allChannels = new List<ProviderChannel>();
+                var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                int msgId = 1;
+                var waitDeadline = DateTime.UtcNow.AddSeconds(25);
+                bool gridReady = false;
+
+                while (DateTime.UtcNow < waitDeadline)
+                {
+                    statusCallback("Step 1/2: Waiting for YouTube TV live guide grid to load...");
+                    string? res = await EvaluateJsStringAsync(ws, msgId++, GetYouTubeTvScraperJs());
+                    if (!string.IsNullOrWhiteSpace(res))
+                    {
+                        if (res.StartsWith("{\"status\":", StringComparison.Ordinal))
                         {
-                            return parsed;
+                            log($"[Sync] {res}");
                         }
+                        else if (res.StartsWith("[", StringComparison.Ordinal) && res != "[]")
+                        {
+                            var batch = ProviderManager.ParseChannelsJson(res);
+                            if (batch.Count > 0)
+                            {
+                                gridReady = true;
+                                foreach (var ch in batch)
+                                {
+                                    if (seenNames.Add(ch.Name))
+                                    {
+                                        ch.ChannelNumber = (allChannels.Count + 1).ToString();
+                                        allChannels.Add(ch);
+                                    }
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    await Task.Delay(1200);
+                }
+
+                if (!gridReady)
+                    return [];
+
+                // Now dispatch real CDP mouseWheel + PageDown events to scroll through the entire virtualized guide
+                int stagnantPasses = 0;
+                for (int scrollStep = 1; scrollStep <= 45; scrollStep++)
+                {
+                    statusCallback($"Step 1/2: Scrolling YouTube TV guide... ({allChannels.Count} channels found so far)");
+
+                    // Send 3 hardware mouseWheel ticks down at the center of the guide (x=640, y=550)
+                    for (int w = 0; w < 3; w++)
+                    {
+                        await SendCdpCommandAsync(ws, msgId++, "Input.dispatchMouseEvent", new
+                        {
+                            type = "mouseWheel",
+                            x = 640,
+                            y = 550,
+                            deltaX = 0,
+                            deltaY = 700
+                        });
+                        await Task.Delay(90);
+                    }
+
+                    await Task.Delay(250);
+
+                    string? batchJson = await EvaluateJsStringAsync(ws, msgId++, GetYouTubeTvScraperJs());
+                    int beforeCount = allChannels.Count;
+
+                    if (!string.IsNullOrWhiteSpace(batchJson) && batchJson.StartsWith("[", StringComparison.Ordinal))
+                    {
+                        var batch = ProviderManager.ParseChannelsJson(batchJson);
+                        foreach (var ch in batch)
+                        {
+                            if (seenNames.Add(ch.Name))
+                            {
+                                ch.ChannelNumber = (allChannels.Count + 1).ToString();
+                                allChannels.Add(ch);
+                            }
+                        }
+                    }
+
+                    if (allChannels.Count == beforeCount)
+                    {
+                        stagnantPasses++;
+                        if (stagnantPasses >= 5)
+                            break;
+                    }
+                    else
+                    {
+                        stagnantPasses = 0;
                     }
                 }
 
-                await Task.Delay(1500);
+                return allChannels;
             }
-
-            return [];
         }
         finally
         {
@@ -147,7 +228,7 @@ public class ChannelSyncService
                 {
                     using var closeWs = new ClientWebSocket();
                     await closeWs.ConnectAsync(new Uri(wsUrl), CancellationToken.None);
-                    await SendCdpCommandAsync(closeWs, 999, "Browser.close", new { });
+                    await SendCdpCommandAsync(closeWs, 9999, "Browser.close", new { });
                     await Task.Delay(300);
                 }
                 catch { }
@@ -250,12 +331,10 @@ public class ChannelSyncService
 
     private static string GetYouTubeTvScraperJs() => """
         (() => {
-          // If YouTube TV redirected to /welcome, user is not signed in
           if (location.pathname.includes('/welcome')) {
             return JSON.stringify({ status: 'not_logged_in', url: location.href });
           }
 
-          // If not on /live yet, navigate to /live
           if (!location.pathname.startsWith('/live')) {
             location.href = 'https://tv.youtube.com/live';
             return JSON.stringify({ status: 'navigating_to_live', url: location.href });
@@ -265,7 +344,6 @@ public class ChannelSyncService
           const seen = new Set();
           let chNum = 1;
 
-          // Collect thumbnails across both standard DOM and any open Shadow Roots
           const queryAllDeep = (selector, root = document) => {
             const results = Array.from(root.querySelectorAll(selector));
             const allElements = root.querySelectorAll('*');

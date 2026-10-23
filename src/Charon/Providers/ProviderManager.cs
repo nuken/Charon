@@ -121,58 +121,197 @@ public class ProviderManager
         {
             File.WriteAllText(channelsPath, "[]", new UTF8Encoding(false));
         }
+		
+		// Auto-create/update YouTube TV's tune.js and style.css
+        if (isYttv)
+        {
+            const string yttvTuneJs = """
+                (function() {
+                  if (location.pathname.startsWith('/live')) return;
+
+                  const queryAllDeep = (selector, root = document) => {
+                    const results = Array.from(root.querySelectorAll(selector));
+                    const all = root.querySelectorAll('*');
+                    for (const el of all) {
+                      if (el.shadowRoot) {
+                        results.push(...queryAllDeep(selector, el.shadowRoot));
+                      }
+                    }
+                    return results;
+                  };
+
+                  // 1. Control the YouTube HTML5 player API
+                  const players = queryAllDeep('#movie_player, .html5-video-player');
+                  for (const player of players) {
+                    try {
+                      if (typeof player.unMute === 'function') player.unMute();
+                      if (typeof player.setVolume === 'function') player.setVolume(100);
+                      if (typeof player.playVideo === 'function' && typeof player.getPlayerState === 'function' && player.getPlayerState() !== 1) {
+                        player.playVideo();
+                      }
+                      if (typeof player.hideControls === 'function') player.hideControls();
+                      player.classList.add('ytp-autohide');
+                      if (typeof player.setSize === 'function') {
+                        player.setSize(window.innerWidth, window.innerHeight);
+                      }
+                    } catch (e) {}
+                  }
+
+                  // 2. Find the active live video element (piercing Shadow DOMs)
+                  const videos = queryAllDeep('video');
+                  const v = videos.find(x => x.videoWidth > 0 || !x.closest('ytu-epg-row, ytu-guide, .tenx-thumb')) || videos[0];
+                  if (!v) return;
+
+                  v.muted = false;
+                  v.volume = 1.0;
+                  if (v.paused) v.play().catch(() => {});
+
+                  // 3. Force the video element itself to fill 1280x720 at (0,0)
+                  const fullBoxCss = [
+                    ['position', 'fixed'],
+                    ['inset', '0px'],
+                    ['top', '0px'],
+                    ['left', '0px'],
+                    ['right', '0px'],
+                    ['bottom', '0px'],
+                    ['margin', '0px'],
+                    ['margin-left', '0px'],
+                    ['padding', '0px'],
+                    ['padding-left', '0px'],
+                    ['width', '100vw'],
+                    ['height', '100vh'],
+                    ['min-width', '100vw'],
+                    ['min-height', '100vh'],
+                    ['max-width', '100vw'],
+                    ['max-height', '100vh'],
+                    ['transform', 'none'],
+                    ['translate', 'none'],
+                    ['contain', 'none'],
+                    ['will-change', 'auto']
+                  ];
+
+                  for (const [prop, val] of fullBoxCss) {
+                    v.style.setProperty(prop, val, 'important');
+                  }
+                  v.style.setProperty('object-fit', 'fill', 'important');
+                  v.style.setProperty('z-index', '2147483647', 'important');
+                  v.style.setProperty('background', '#000', 'important');
+
+                  // 4. Walk ALL ancestors (including across ShadowRoot boundaries!) to strip any left offset or containing block trap
+                  let curr = v.parentElement || (v.getRootNode && v.getRootNode().host);
+                  while (curr && curr !== document && curr !== document.documentElement) {
+                    if (curr.style) {
+                      for (const [prop, val] of fullBoxCss) {
+                        curr.style.setProperty(prop, val, 'important');
+                      }
+                      // Also zero out any CSS custom variables YouTube TV uses for the left guide drawer width!
+                      curr.style.setProperty('--ytu-guide-width', '0px', 'important');
+                      curr.style.setProperty('--app-drawer-width', '0px', 'important');
+                      curr.style.setProperty('--ytu-watch-sidebar-width', '0px', 'important');
+                    }
+                    if (curr.parentElement) {
+                      curr = curr.parentElement;
+                    } else {
+                      const root = curr.getRootNode && curr.getRootNode();
+                      curr = root && root.host ? root.host : null;
+                    }
+                  }
+
+                  // 5. Hide any sibling sidebars/drawers inside all Shadow Roots
+                  const sidebars = queryAllDeep('tp-yt-app-drawer, ytu-guide, ytu-mini-guide, ytu-nav-bar, ytu-header-bar, ytu-player-bar, ytu-player-controls, .ytp-chrome-bottom, .ytp-chrome-top');
+                  for (const sb of sidebars) {
+                    if (sb.style) {
+                      sb.style.setProperty('display', 'none', 'important');
+                      sb.style.setProperty('width', '0px', 'important');
+                    }
+                  }
+                })();
+                """;
+            File.WriteAllText(tuneJsPath, yttvTuneJs, new UTF8Encoding(false));
+
+            const string yttvStyleCss = """
+                :root, html, body, ytu-app {
+                  --ytu-guide-width: 0px !important;
+                  --app-drawer-width: 0px !important;
+                  --ytu-watch-sidebar-width: 0px !important;
+                  margin: 0 !important;
+                  padding: 0 !important;
+                  width: 100vw !important;
+                  height: 100vh !important;
+                  overflow: hidden !important;
+                  background: #000 !important;
+                  cursor: none !important;
+                }
+                """;
+            File.WriteAllText(styleCssPath, yttvStyleCss, new UTF8Encoding(false));
+        }
 
         // Auto-create Spectrum's tune.js and style.css if missing
         if (isSpectrum)
         {
-            if (!File.Exists(tuneJsPath))
-            {
-                const string spectrumTuneJs = """
-                    (function() {
-                      const v = document.querySelector('video');
-                      if (v) {
-                        v.muted = false;
-                        v.volume = 1.0;
-                        if (v.paused) {
-                          v.play().catch(() => {});
+            const string spectrumTuneJs = """
+                (function() {
+                  const queryAllDeep = (selector, root = document) => {
+                    const results = Array.from(root.querySelectorAll(selector));
+                    const all = root.querySelectorAll('*');
+                    for (const el of all) {
+                      if (el.shadowRoot) {
+                        results.push(...queryAllDeep(selector, el.shadowRoot));
+                      }
+                    }
+                    return results;
+                  };
+
+                  const videos = queryAllDeep('video');
+                  const v = videos.find(x => x.readyState > 0 || x.src || x.srcObject) || videos[0];
+                  if (!v) return;
+
+                  v.muted = false;
+                  v.volume = 1.0;
+                  if (v.paused) {
+                    v.play().catch(() => {});
+                  }
+
+                  v.style.setProperty('position', 'fixed', 'important');
+                  v.style.setProperty('inset', '0px', 'important');
+                  v.style.setProperty('top', '0px', 'important');
+                  v.style.setProperty('left', '0px', 'important');
+                  v.style.setProperty('width', '100vw', 'important');
+                  v.style.setProperty('height', '100vh', 'important');
+                  v.style.setProperty('object-fit', 'fill', 'important');
+                  v.style.setProperty('z-index', '2147483647', 'important');
+                  v.style.setProperty('opacity', '1', 'important');
+                  v.style.setProperty('visibility', 'visible', 'important');
+
+                  // Walk up the ancestor chain from <video> to <body>:
+                  // Keep every direct ancestor visible, and hide EVERY sibling of those ancestors (all overlays, controls, headers, spinners)!
+                  const ancestors = new Set();
+                  let curr = v;
+                  while (curr) {
+                    ancestors.add(curr);
+                    curr = curr.parentElement || (curr.getRootNode && curr.getRootNode().host);
+                  }
+
+                  for (const anc of ancestors) {
+                    if (anc !== v && anc.style) {
+                      anc.style.setProperty('transform', 'none', 'important');
+                      anc.style.setProperty('contain', 'none', 'important');
+                      anc.style.setProperty('z-index', '2147483647', 'important');
+                    }
+                    const parent = anc.parentElement || (anc.getRootNode && anc.getRootNode());
+                    if (parent && parent.children) {
+                      for (const sibling of parent.children) {
+                        if (!ancestors.has(sibling) && sibling.tagName !== 'STYLE' && sibling.tagName !== 'SCRIPT' && sibling.style) {
+                          sibling.style.setProperty('opacity', '0', 'important');
+                          sibling.style.setProperty('visibility', 'hidden', 'important');
+                          sibling.style.setProperty('pointer-events', 'none', 'important');
                         }
                       }
-                    })();
-                    """;
-                File.WriteAllText(tuneJsPath, spectrumTuneJs, new UTF8Encoding(false));
-            }
-
-            if (!File.Exists(styleCssPath))
-            {
-                const string spectrumStyleCss = """
-                    html, body {
-                      margin: 0 !important;
-                      padding: 0 !important;
-                      width: 100vw !important;
-                      height: 100vh !important;
-                      overflow: hidden !important;
-                      background: #000 !important;
-                      cursor: none !important;
                     }
-                    video {
-                      position: fixed !important;
-                      top: 0 !important;
-                      left: 0 !important;
-                      width: 100vw !important;
-                      height: 100vh !important;
-                      object-fit: contain !important;
-                      z-index: 2147483647 !important;
-                      background: #000 !important;
-                    }
-                    header, nav, footer, .site-header, .player-controls, .control-bar, .mini-guide,
-                    [class*="controlBar"], [class*="overlay"], [class*="header"], [class*="guide"] {
-                      display: none !important;
-                      opacity: 0 !important;
-                      pointer-events: none !important;
-                    }
-                    """;
-                File.WriteAllText(styleCssPath, spectrumStyleCss, new UTF8Encoding(false));
-            }
+                  }
+                })();
+                """;
+            File.WriteAllText(tuneJsPath, spectrumTuneJs, new UTF8Encoding(false));
         }
 
         ProviderManifest? manifest = null;
