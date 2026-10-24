@@ -5,7 +5,9 @@
 # Credits
 
 Spectrum code built off of spectrum.py from the great work of Kineticman **[https://github.com/kineticman/FastChannels](https://github.com/kineticman/FastChannels)**.
+
 Xfinity provider by bnhf **[https://github.com/bnhf](https://github.com/bnhf)**
+
 # Charon
 
 Charon is a C# desktop application designed to manage, tune, and stream content from web-based media providers.
