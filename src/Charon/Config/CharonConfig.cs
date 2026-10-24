@@ -22,7 +22,7 @@ public class CharonConfig
     public string VideoEncoder { get; set; } = "h264_nvenc"; // h264_nvenc, h264_qsv, h264_amf, libx264
     public string VideoBitrate { get; set; } = "8M";
     public int MaxConcurrentTuners { get; set; } = 2;
-
+    public bool Enable1080p { get; set; } = false;
     // Saved Channels DVR Server settings for Gracenote StationId resolution (blank on first run)
     public string ChannelsDvrIp { get; set; } = string.Empty;
     public int ChannelsDvrPort { get; set; } = 8089;

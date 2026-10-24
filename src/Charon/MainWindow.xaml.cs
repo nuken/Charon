@@ -81,6 +81,7 @@ public partial class MainWindow : Window
         TxtCustomY.Text = _config.CustomY.ToString();
 
         SelectComboItem(CmbEncoder, _config.VideoEncoder);
+        SelectComboItem(CmbResolution, _config.Enable1080p ? "1080p" : "720p");
         SelectComboItem(CmbMaxTuners, _config.MaxConcurrentTuners.ToString());
         SelectComboItem(CmbWindowMode, _config.WindowPlacement.ToString());
     }
@@ -518,6 +519,9 @@ public partial class MainWindow : Window
         if (CmbEncoder.SelectedItem is ComboBoxItem encItem && encItem.Content is string enc)
             _config.VideoEncoder = enc;
 
+        if (CmbResolution.SelectedItem is ComboBoxItem resItem && resItem.Content is string res)
+            _config.Enable1080p = res.Equals("1080p", StringComparison.OrdinalIgnoreCase);
+
         if (CmbMaxTuners.SelectedItem is ComboBoxItem maxItem &&
             int.TryParse(maxItem.Content?.ToString(), out int maxTuners))
         {
@@ -532,7 +536,7 @@ public partial class MainWindow : Window
 
         _config.Save();
         UpdateTunerStatus();
-        AppendLog($"[Config] Saved: Encoder={_config.VideoEncoder}, MaxTuners={_config.MaxConcurrentTuners}, WindowPlacement={_config.WindowPlacement}");
+        AppendLog($"[Config] Saved: Encoder={_config.VideoEncoder}, Resolution={( _config.Enable1080p ? "1080p" : "720p" )}, MaxTuners={_config.MaxConcurrentTuners}, WindowPlacement={_config.WindowPlacement}");
     }
 
     private void CustomCoords_LostFocus(object sender, RoutedEventArgs e)

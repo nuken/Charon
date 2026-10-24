@@ -57,9 +57,12 @@ public class ChannelSyncService
         log($"[Sync] Using authenticated Chrome profile: {selectedProfile}");
 
         int cdpPort = FindFreeLoopbackPort(9330);
-        bool isSpectrum = provider.Manifest.Id.Contains("spectrum", StringComparison.OrdinalIgnoreCase);
+       bool isSpectrum = provider.Manifest.Id.Contains("spectrum", StringComparison.OrdinalIgnoreCase);
+        bool isXfinity = provider.Manifest.Id.Contains("xfinity", StringComparison.OrdinalIgnoreCase);
         string targetUrl = isSpectrum
             ? "https://watch.spectrum.net/guide"
+            : isXfinity
+            ? "https://www.xfinity.com/stream/listings"
             : "https://tv.youtube.com/live";
 
         int posX = config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : -3200;
@@ -122,6 +125,28 @@ public class ChannelSyncService
                     }
                     await Task.Delay(1500);
                 }
+                return [];
+            }
+			else if (isXfinity)
+            {
+                string xfinityJs = GetXfinityScraperJs();
+                var deadline = DateTime.UtcNow.AddSeconds(30);
+                int attempt = 0;
+
+                while (DateTime.UtcNow < deadline)
+                {
+                    attempt++;
+                    statusCallback($"Step 1/2: Waiting for Xfinity Stream guide data (<tv-page-grid>) to load (attempt {attempt})...");
+                    string? res = await EvaluateJsStringAsync(ws, attempt, xfinityJs);
+                    if (!string.IsNullOrWhiteSpace(res) && res.StartsWith("[", StringComparison.Ordinal) && res != "[]")
+                    {
+                        var parsed = ProviderManager.ParseChannelsJson(res);
+                        if (parsed.Count > 0)
+                            return parsed;
+                    }
+                    await Task.Delay(1500);
+                }
+
                 return [];
             }
             else
@@ -466,6 +491,77 @@ public class ChannelSyncService
           return JSON.stringify(list);
         })()
         """;
+		
+	private static string GetXfinityScraperJs() => """
+        (() => {
+          const queryAllDeep = (selector, root = document) => {
+            const list = Array.from(root.querySelectorAll(selector));
+            const all = root.querySelectorAll('*');
+            for (const el of all) {
+              if (el.shadowRoot) list.push(...queryAllDeep(selector, el.shadowRoot));
+            }
+            return list;
+          };
+
+          const grid = document.querySelector('tv-page-grid') || queryAllDeep('tv-page-grid')[0];
+          const rawChannels = grid && Array.isArray(grid.channels) ? grid.channels : null;
+          if (!rawChannels || rawChannels.length === 0) {
+            return JSON.stringify([]);
+          }
+
+          // Group by callSign so we deduplicate SD/HD/ToGo duplicates and prefer the 1000-1999 HD tier!
+          const bestByCallSign = new Map();
+
+          const scoreChannel = (c) => {
+            const num = Number(c.number || 0);
+            let score = 0;
+            if (num >= 1000 && num <= 1999) score += 100; // Prefer 1000-1999 HD tier per bnhf
+            if (c.isHD) score += 50;
+            if (!Array.isArray(c.restrictStreaming) || !c.restrictStreaming.includes('out-of-home')) score += 10;
+            return score;
+          };
+
+          for (const c of rawChannels) {
+            if (!c || c.entitled === false) continue;
+            const callSign = String(c.callSign || '').trim();
+            const companyId = String(c.companyId || c.networkAffiliateCompanyId || '').trim();
+            if (!callSign || !companyId) continue;
+
+            const hint = String(c.callSignVoiceOverHint || '').trim();
+            // Skip Music Choice audio channels
+            if (/^music choice/i.test(hint) || /^mc\d+$/i.test(callSign) || /^~mc/i.test(callSign)) continue;
+
+            const key = callSign.toUpperCase();
+            const existing = bestByCallSign.get(key);
+            if (!existing || scoreChannel(c) > scoreChannel(existing)) {
+              bestByCallSign.set(key, c);
+            }
+          }
+
+          const results = [];
+          const sorted = Array.from(bestByCallSign.values())
+            .sort((a, b) => Number(a.number || 99999) - Number(b.number || 99999));
+
+          for (const c of sorted) {
+            const callSign = String(c.callSign).trim();
+            const companyId = String(c.companyId || c.networkAffiliateCompanyId).trim();
+            const num = String(c.number || results.length + 1);
+            const hint = String(c.callSignVoiceOverHint || '').trim();
+            const displayName = hint || callSign;
+            const safeId = callSign.toLowerCase().replace(/[^a-z0-9]+/g, '') + '-xf';
+
+            results.push({
+              Id: safeId,
+              Name: displayName,
+              ChannelNumber: num,
+              StationId: '', // Leave empty so Channels DVR resolves real Gracenote StationId!
+              Url: `https://www.xfinity.com/stream/live/${encodeURIComponent(callSign)}/${companyId}/${encodeURIComponent(callSign)}`
+            });
+          }
+
+          return JSON.stringify(results);
+        })()
+        """;
 
     private static async Task<int> MatchGracenoteStationsAsync(
         List<ProviderChannel> channels,
@@ -491,13 +587,21 @@ public class ChannelSyncService
             string rawName = ch.Name.Trim();
             List<TmsStation>? results = await QueryChannelsDvrTmsAsync(serverUrl, rawName);
 
-            // Tier 2: Strip trailing numbers (e.g., "WSOC 9" -> "WSOC", "FOX 46" -> "FOX")
-            if (results is null || results.Count == 0)
+            // If this is an Xfinity URL (/stream/live/{callSign}/{companyId}/{callSign}), also try querying by the URL's callSign!
+            var xfMatch = System.Text.RegularExpressions.Regex.Match(ch.Url ?? "", @"/stream/live/([^/]+)/\d+/");
+            string? urlCallSign = xfMatch.Success ? Uri.UnescapeDataString(xfMatch.Groups[1].Value) : null;
+
+            if ((results is null || results.Count == 0) && !string.IsNullOrWhiteSpace(urlCallSign))
             {
-                string stripped = System.Text.RegularExpressions.Regex.Replace(rawName, @"\s+\d+$", "");
-                if (!string.Equals(stripped, rawName, StringComparison.OrdinalIgnoreCase))
+                results = await QueryChannelsDvrTmsAsync(serverUrl, urlCallSign);
+                if (results is null || results.Count == 0)
                 {
-                    results = await QueryChannelsDvrTmsAsync(serverUrl, stripped);
+                    // Strip trailing HD/D (e.g. "WCCOD" -> "WCCO", "CNNHD" -> "CNN")
+                    string cleanCs = System.Text.RegularExpressions.Regex.Replace(urlCallSign, @"(?:HD|DT\d*|D)$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (cleanCs.Length >= 3 && !string.Equals(cleanCs, urlCallSign, StringComparison.OrdinalIgnoreCase))
+                    {
+                        results = await QueryChannelsDvrTmsAsync(serverUrl, cleanCs);
+                    }
                 }
             }
 

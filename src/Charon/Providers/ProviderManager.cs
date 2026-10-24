@@ -63,8 +63,10 @@ public class ProviderManager
         // Ensure both default provider directories exist out of the box
         string defaultYttvDir = Path.Combine(_providersRoot, "YouTubeTV");
         string defaultSpectrumDir = Path.Combine(_providersRoot, "Spectrum");
+		string defaultXfinityDir = Path.Combine(_providersRoot, "Xfinity");
         Directory.CreateDirectory(defaultYttvDir);
         Directory.CreateDirectory(defaultSpectrumDir);
+		Directory.CreateDirectory(defaultXfinityDir);
 
         // If someone placed channels.json directly in Providers\ root instead of Providers\YouTubeTV\, move/copy it into Providers\YouTubeTV\
         string rootChannelsFile = Path.Combine(_providersRoot, "channels.json");
@@ -87,6 +89,7 @@ public class ProviderManager
         string folderName = Path.GetFileName(dir);
         bool isYttv = folderName.Equals("YouTubeTV", StringComparison.OrdinalIgnoreCase);
         bool isSpectrum = folderName.Equals("Spectrum", StringComparison.OrdinalIgnoreCase);
+		bool isXfinity = folderName.Equals("Xfinity", StringComparison.OrdinalIgnoreCase);
 
         string manifestPath = Path.Combine(dir, "provider.json");
         string altManifestPath = Path.Combine(dir, "manifest.json");
@@ -94,8 +97,12 @@ public class ProviderManager
         string tuneJsPath = Path.Combine(dir, "tune.js");
         string styleCssPath = Path.Combine(dir, "style.css");
 
-        string defaultName = isYttv ? "YouTube TV" : isSpectrum ? "Spectrum TV" : folderName;
-        string defaultLoginUrl = isSpectrum ? "https://watch.spectrum.net/guide" : "https://tv.youtube.com";
+        string defaultName = isYttv ? "YouTube TV" : isSpectrum ? "Spectrum TV" : isXfinity ? "Xfinity Stream" : folderName;
+        string defaultLoginUrl = isSpectrum
+            ? "https://watch.spectrum.net/guide"
+            : isXfinity
+            ? "https://www.xfinity.com/stream"
+            : "https://tv.youtube.com";
         int defaultDelayMs = isSpectrum ? 2000 : 1500;
 
         // Support manifest.json if present, or auto-create provider.json if missing!
@@ -140,7 +147,7 @@ public class ProviderManager
                     return results;
                   };
 
-                  // 1. Control the YouTube HTML5 player API
+                 // 1. Control the YouTube HTML5 player API
                   const players = queryAllDeep('#movie_player, .html5-video-player');
                   for (const player of players) {
                     try {
@@ -153,6 +160,9 @@ public class ProviderManager
                       player.classList.add('ytp-autohide');
                       if (typeof player.setSize === 'function') {
                         player.setSize(window.innerWidth, window.innerHeight);
+                      }
+                      if (typeof player.setPlaybackQualityRange === 'function') {
+                        player.setPlaybackQualityRange('hd720', 'hd1080');
                       }
                     } catch (e) {}
                   }
@@ -312,6 +322,230 @@ public class ProviderManager
                 })();
                 """;
             File.WriteAllText(tuneJsPath, spectrumTuneJs, new UTF8Encoding(false));
+        
+		const string spectrumStyleCss = """
+                html, body {
+                  margin: 0 !important;
+                  padding: 0 !important;
+                  width: 100vw !important;
+                  height: 100vh !important;
+                  overflow: hidden !important;
+                  background: #000 !important;
+                  cursor: none !important;
+                }
+                *:has(video) {
+                  transform: none !important;
+                  filter: none !important;
+                  perspective: none !important;
+                  contain: none !important;
+                  isolation: auto !important;
+                  z-index: 2147483647 !important;
+                  background: #000 !important;
+                }
+                video {
+                  position: fixed !important;
+                  inset: 0 !important;
+                  top: 0 !important;
+                  left: 0 !important;
+                  width: 100vw !important;
+                  height: 100vh !important;
+                  object-fit: fill !important;
+                  z-index: 2147483647 !important;
+                  background: #000 !important;
+                  pointer-events: none !important;
+                }
+                body *:not(:has(video)):not(video) {
+                  opacity: 0 !important;
+                  visibility: hidden !important;
+                  pointer-events: none !important;
+                }
+                header, nav, footer, aside, button, svg,
+                .site-header, .player-controls, .control-bar, .mini-guide,
+                .vjs-control-bar, .vjs-big-play-button, .vjs-loading-spinner, .vjs-text-track-display,
+                [class*="control" i], [class*="overlay" i], [class*="header" i], [class*="guide" i],
+                [class*="navbar" i], [class*="toolbar" i], [class*="scrim" i], [class*="gradient" i],
+                [class*="banner" i], [class*="modal" i], [class*="tooltip" i], [role="toolbar"], [role="navigation"] {
+                  display: none !important;
+                  opacity: 0 !important;
+                  visibility: hidden !important;
+                  pointer-events: none !important;
+                }
+                """;
+            File.WriteAllText(styleCssPath, spectrumStyleCss, new UTF8Encoding(false));
+		}
+		
+		if (isXfinity)
+        {
+            const string xfinityStyleCss = """
+                html, body {
+                  margin: 0 !important;
+                  padding: 0 !important;
+                  width: 100vw !important;
+                  height: 100vh !important;
+                  overflow: hidden !important;
+                  background: #000 !important;
+                  cursor: none !important;
+                }
+                tv-player-nav, tv-player-rating, tv-player-mini-controls, tv-player-buffer-indicator,
+                tv-player-notification, tv-player-network-alert, tv-player-debug-panel, tv-player-panel-loading,
+                tv-player-panel-next-episode, tv-player-panel-caster, tv-overlay-player-info, tv-overlay-player-ooh-info,
+                #playerControlPanel, #nextEpisodeControls, #playerLastWatchedPanel, #inner-cc-container {
+                  display: none !important;
+                  opacity: 0 !important;
+                  pointer-events: none !important;
+                }
+                /* Kept in the DOM so tune.js can click Continue */
+                tv-player-still-watching {
+                  opacity: 0 !important;
+                }
+                """;
+            File.WriteAllText(styleCssPath, xfinityStyleCss, new UTF8Encoding(false));
+
+            const string xfinityTuneJs = """
+                (function () {
+                  try {
+                    const blockHeavyCodecs = (mimeType) => {
+                      if (typeof mimeType !== 'string') return false;
+                      const lower = mimeType.toLowerCase();
+                      return lower.includes('av01');
+                    };
+                    if (window.MediaSource && !window.__charonCodecLocked) {
+                      window.__charonCodecLocked = true;
+                      const origIsTypeSupported = window.MediaSource.isTypeSupported.bind(window.MediaSource);
+                      window.MediaSource.isTypeSupported = function (mimeType) {
+                        if (blockHeavyCodecs(mimeType)) return false;
+                        return origIsTypeSupported(mimeType);
+                      };
+                    }
+                    if (window.HTMLMediaElement && !window.__charonCanPlayLocked) {
+                      window.__charonCanPlayLocked = true;
+                      const origCanPlayType = window.HTMLMediaElement.prototype.canPlayType;
+                      window.HTMLMediaElement.prototype.canPlayType = function (mimeType) {
+                        if (blockHeavyCodecs(mimeType)) return '';
+                        return origCanPlayType.call(this, mimeType);
+                      };
+                    }
+                    if (navigator.userActivation) {
+                      Object.defineProperty(navigator.userActivation, 'isActive', { get: () => true });
+                      Object.defineProperty(navigator.userActivation, 'hasBeenActive', { get: () => true });
+                    }
+                    if (window.HTMLVideoElement && !window.__charonQualityLocked) {
+                      window.__charonQualityLocked = true;
+                      const origGetQuality = window.HTMLVideoElement.prototype.getVideoPlaybackQuality;
+                      if (origGetQuality) {
+                        window.HTMLVideoElement.prototype.getVideoPlaybackQuality = function () {
+                          const q = origGetQuality.call(this);
+                          return {
+                            creationTime: q.creationTime,
+                            totalVideoFrames: q.totalVideoFrames,
+                            droppedVideoFrames: 0,
+                            corruptedVideoFrames: 0
+                          };
+                        };
+                      }
+                    }
+                  } catch {}
+
+                  const dismissPlayerDialogs = () => {
+                    try {
+                      const errorPanel = document.querySelector('tv-player-panel-error#errorPanel');
+                      if (errorPanel && !errorPanel.hidden) {
+                        const page = errorPanel.querySelector('tv-page-error-content.iron-selected');
+                        const title = page && page.querySelector('#title');
+                        if (title && /paused playback/i.test(title.textContent)) {
+                          const resume = page.querySelector('tv-button button');
+                          if (resume) resume.click();
+                        }
+                      }
+                      const stillWatching = document.getElementById('playerStillWatching');
+                      if (stillWatching && getComputedStyle(stillWatching).display !== 'none') {
+                        const cont = stillWatching.querySelector('#continueButton button');
+                        if (cont) cont.click();
+                        else if (typeof stillWatching._onContinue === 'function') stillWatching._onContinue();
+                      }
+                    } catch {}
+                  };
+                  dismissPlayerDialogs();
+
+                  if (window.__charonTunerActive) return;
+                  window.__charonTunerActive = true;
+
+                  const injectStaticCss = () => {
+                    if (!document.getElementById('charon-static-css') && (document.head || document.documentElement)) {
+                      const s = document.createElement('style');
+                      s.id = 'charon-static-css';
+                      s.textContent = `
+                        html, body { background: #000 !important; overflow: hidden !important; margin: 0 !important; padding: 0 !important; cursor: none !important; }
+                        tv-player-nav, tv-player-rating, tv-player-mini-controls, tv-player-buffer-indicator,
+                        tv-player-notification, tv-player-network-alert, tv-player-debug-panel, tv-player-panel-loading,
+                        tv-player-panel-next-episode, tv-player-panel-caster, tv-overlay-player-info, tv-overlay-player-ooh-info,
+                        #playerControlPanel, #nextEpisodeControls, #playerLastWatchedPanel, #inner-cc-container {
+                          display: none !important;
+                        }
+                        tv-player-still-watching { opacity: 0 !important; }
+                      `;
+                      (document.head || document.documentElement).appendChild(s);
+                    }
+                  };
+                  injectStaticCss();
+
+                  const findMainVideo = () => document.querySelector('#viper-player-container video') ||
+                    Array.from(document.querySelectorAll('video'))
+                      .sort((a, b) => (b.videoWidth * b.videoHeight) - (a.videoWidth * a.videoHeight))[0];
+
+                  window.__charonIsPaused = () => {
+                    dismissPlayerDialogs();
+                    const v = findMainVideo();
+                    if (!v) return false;
+                    return v.paused;
+                  };
+
+                  const checkPlayer = () => {
+                    injectStaticCss();
+                    dismissPlayerDialogs();
+                    const allVideos = Array.from(document.querySelectorAll('video'));
+                    if (allVideos.length === 0) return;
+                    for (const v of allVideos) {
+                      if (v.muted) v.muted = false;
+                      if (v.volume < 1.0) v.volume = 1.0;
+                      if (v.paused && (v.src || v.currentSrc || v.readyState >= 1)) {
+                        v.play().catch(() => {});
+                      }
+                    }
+                    const readyVideos = allVideos
+                      .filter((v) => v.readyState >= 2 && v.videoWidth > 0 && !v.paused)
+                      .sort((a, b) => (b.videoWidth * b.videoHeight) - (a.videoWidth * a.videoHeight));
+                    const activeVideo = readyVideos[0];
+                    if (!activeVideo) return;
+                    for (const v of allVideos) {
+                      if (v !== activeVideo && !v.paused) {
+                        v.muted = true;
+                        try { v.pause(); } catch {}
+                      }
+                    }
+                    if (!activeVideo.__charonStyled) {
+                      activeVideo.__charonStyled = true;
+                      activeVideo.style.cssText = [
+                        'background: black !important',
+                        'cursor: none !important',
+                        'display: block !important',
+                        'height: 100vh !important',
+                        'width: 100vw !important',
+                        'left: 0 !important',
+                        'top: 0 !important',
+                        'margin: 0 !important',
+                        'max-height: none !important',
+                        'max-width: none !important',
+                        'object-fit: fill !important',
+                        'position: fixed !important',
+                        'z-index: 999999 !important'
+                      ].join('; ');
+                    }
+                  };
+                  setInterval(checkPlayer, 300);
+                })();
+                """;
+            File.WriteAllText(tuneJsPath, xfinityTuneJs, new UTF8Encoding(false));
         }
 
         ProviderManifest? manifest = null;

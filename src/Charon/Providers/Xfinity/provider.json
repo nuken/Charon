@@ -1,0 +1,8 @@
+{
+  "id": "xfinity",
+  "name": "Xfinity Stream",
+  "groupTitle": "Xfinity Stream",
+  "enabled": true,
+  "loginUrl": "https://www.xfinity.com/stream",
+  "tuneScriptDelayMs": 1500
+}

@@ -1,0 +1,35 @@
+html, body {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+  background: #000 !important;
+  cursor: none !important;
+}
+
+tv-player-nav,
+tv-player-rating,
+tv-player-mini-controls,
+tv-player-buffer-indicator,
+tv-player-notification,
+tv-player-network-alert,
+tv-player-debug-panel,
+tv-player-panel-loading,
+tv-player-panel-next-episode,
+tv-player-panel-caster,
+tv-overlay-player-info,
+tv-overlay-player-ooh-info,
+#playerControlPanel,
+#nextEpisodeControls,
+#playerLastWatchedPanel,
+#inner-cc-container {
+  display: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Kept in the DOM so tune.js can click Continue */
+tv-player-still-watching {
+  opacity: 0 !important;
+}

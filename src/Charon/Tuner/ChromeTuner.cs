@@ -18,8 +18,11 @@ public sealed class ChromeTuner
     private static readonly HttpClient Http = new();
     private static readonly object ProfileSyncLock = new();
 
-    private const int WindowWidth = 1280;
-    private const int WindowHeight = 752;
+    private int WindowWidth => _config.Enable1080p ? 1920 : 1280;
+    private int WindowHeight => _config.Enable1080p ? 1112 : 752;
+    private int ViewportWidth => _config.Enable1080p ? 1920 : 1280;
+    private int ViewportHeight => _config.Enable1080p ? 1080 : 720;
+    private int VideoBitrate => _config.Enable1080p ? 18000000 : 15000000;
 
     public ChromeTuner(CharonConfig config)
     {
@@ -118,6 +121,7 @@ public sealed class ChromeTuner
             $"--app=\"{channel.Url}\"",
             $"--window-size={WindowWidth},{WindowHeight}",
             "--force-device-scale-factor=1",
+			"--force-color-profile=srgb",
             "--autoplay-policy=no-user-gesture-required",
             "--enable-gpu-rasterization",
             "--enable-zero-copy",
@@ -169,7 +173,7 @@ public sealed class ChromeTuner
                 "-map 0:v:0 -map 0:a:0?",
                 "-c:v copy",
                 "-bsf:v h264_mp4toannexb,dump_extra",
-                "-c:a aac -b:a 192k -ar 48000 -ac 2",
+                "-c:a aac -b:a 256k -ar 48000 -ac 2",
                 "-af \"aresample=async=1000\"",
                 "-avoid_negative_ts make_zero -max_interleave_delta 0 -muxdelay 0 -muxpreload 0 -flush_packets 1",
                 "-pat_period 0.25 -sdt_period 0.25 -mpegts_flags +initial_discontinuity+resend_headers -f mpegts pipe:1"
@@ -398,11 +402,11 @@ public sealed class ChromeTuner
                 await SendCdpCommandAsync(ws, 1, "Page.enable", new { }, ct);
                 await SendCdpCommandAsync(ws, 2, "Emulation.setFocusEmulationEnabled", new { enabled = true }, ct);
 
-                // Lock the viewport to exact 1280x720 (16:9) with zero border!
+                // Lock the viewport to exact dimensions with zero border!
                 await SendCdpCommandAsync(ws, 3, "Emulation.setDeviceMetricsOverride", new
                 {
-                    width = 1280,
-                    height = 720,
+                    width = ViewportWidth,
+                    height = ViewportHeight,
                     deviceScaleFactor = 1,
                     mobile = false
                 }, ct);
@@ -484,6 +488,9 @@ public sealed class ChromeTuner
         {
             const string expr = """
             (function() {
+              if (typeof window.__charonIsPaused === 'function') {
+                return Boolean(window.__charonIsPaused());
+              }
               const player = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
               if (player && typeof player.getPlayerState === 'function') {
                 const st = player.getPlayerState();
@@ -746,7 +753,7 @@ public sealed class ChromeTuner
         """;
         File.WriteAllText(Path.Combine(extDir, "offscreen.html"), offscreenHtml);
 
-        const string offscreenJs = """
+        string offscreenJs = $$"""
         let activeRecorder = null;
         let isStarting = false;
 
@@ -768,10 +775,10 @@ public sealed class ChromeTuner
                 mandatory: {
                   chromeMediaSource: 'tab',
                   chromeMediaSourceId: msg.streamId,
-                  minWidth: 1280,
-                  maxWidth: 1280,
-                  minHeight: 720,
-                  maxHeight: 720,
+                  minWidth: {{ViewportWidth}},
+                  maxWidth: {{ViewportWidth}},
+                  minHeight: {{ViewportHeight}},
+                  maxHeight: {{ViewportHeight}},
                   maxFrameRate: 60
                 }
               }
@@ -800,9 +807,9 @@ public sealed class ChromeTuner
 
               activeRecorder = new MediaRecorder(stream, {
                 mimeType: mimeType,
-                videoBitsPerSecond: 12000000,
-                audioBitsPerSecond: 192000,
-                videoKeyFrameIntervalDuration: 1500
+                videoBitsPerSecond: {{VideoBitrate}},
+                audioBitsPerSecond: 256000,
+                videoKeyFrameIntervalDuration: 2000
               });
 
               activeRecorder.ondataavailable = (e) => {
@@ -827,7 +834,7 @@ public sealed class ChromeTuner
 
         return (extDir, extensionId, extVersion);
     }
-
+            
     private string PrepareTunerProfile(int tunerId, int debugPort)
     {
         string tunerDir = GetTunerProfilePath(tunerId);
