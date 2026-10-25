@@ -128,7 +128,6 @@ public sealed class ChromeTuner
             "--ignore-gpu-blocklist",
             "--enable-accelerated-video-decode",
             "--enable-accelerated-video-encode",
-            "--disable-gpu-vsync",
             "--disable-background-media-suspend",
             "--disable-background-timer-throttling",
             "--disable-backgrounding-occluded-windows",
@@ -162,22 +161,9 @@ public sealed class ChromeTuner
             // 1. Load extension and place window off-screen
             _ = Task.Run(() => LoadExtensionAndPlaceWindowAsync(chromeProcess.Id, debugPort, extDir, provider, logCallback, tunerId, ct), ct);
 
-            // 2. Launch FFmpeg
+            // 2. Launch FFmpeg with smooth 60fps frame pacing
             string ffmpegPath = Path.Combine(AppContext.BaseDirectory, "ffmpeg.exe");
-            string ffmpegArgs = string.Join(" ",
-            [
-                "-hide_banner -loglevel warning",
-                "-fflags +genpts+nobuffer",
-                "-probesize 262144 -analyzeduration 500000",
-                "-f webm -i pipe:0",
-                "-map 0:v:0 -map 0:a:0?",
-                "-c:v copy",
-                "-bsf:v h264_mp4toannexb,dump_extra",
-                "-c:a aac -b:a 256k -ar 48000 -ac 2",
-                "-af \"aresample=async=1000\"",
-                "-avoid_negative_ts make_zero -max_interleave_delta 0 -muxdelay 0 -muxpreload 0 -flush_packets 1",
-                "-pat_period 0.25 -sdt_period 0.25 -mpegts_flags +initial_discontinuity+resend_headers -f mpegts pipe:1"
-            ]);
+            string ffmpegArgs = BuildFfmpegArguments();
 
             ffmpegProcess = Process.Start(new ProcessStartInfo
             {
@@ -324,6 +310,39 @@ public sealed class ChromeTuner
 
             TryDeleteFile(Path.Combine(tunerProfile, "SingletonLock"));
         }
+    }
+	
+	private string BuildFfmpegArguments()
+    {
+        string encoder = (_config.VideoEncoder ?? "copy").Trim().ToLowerInvariant();
+        string targetBitrate = _config.Enable1080p ? "15M" : "10M";
+        string maxRate = _config.Enable1080p ? "18M" : "12M";
+        string bufSize = _config.Enable1080p ? "36M" : "24M";
+
+        string videoEncodingArgs = encoder switch
+        {
+            "h264_nvenc" => $"-fps_mode cfr -r 60 -c:v h264_nvenc -preset p4 -tune ll -rc vbr -b:v {targetBitrate} -maxrate {maxRate} -bufsize {bufSize} -g 120 -bf 0",
+            "h264_qsv"   => $"-fps_mode cfr -r 60 -c:v h264_qsv -preset veryfast -global_quality 21 -maxrate {maxRate} -bufsize {bufSize} -g 120 -bf 0",
+            "h264_amf"   => $"-fps_mode cfr -r 60 -c:v h264_amf -quality balanced -rc vbr_peak -b:v {targetBitrate} -maxrate {maxRate} -bufsize {bufSize} -g 120 -bf 0",
+            "libx264"    => $"-fps_mode cfr -r 60 -c:v libx264 -preset superfast -tune zerolatency -crf 20 -maxrate {maxRate} -bufsize {bufSize} -g 120 -bf 0",
+            _            => "-fps_mode passthrough -c:v copy -bsf:v h264_mp4toannexb,dump_extra"
+        };
+
+        // Removed "+nobuffer" from -fflags and added "-use_wallclock_as_timestamps 0"
+        // plus a 64KB MPEG-TS muxrate ceiling smoothing buffer so WebM cluster bursts don't cause micro-stutter!
+        return string.Join(" ",
+        [
+            "-hide_banner -loglevel warning",
+            "-fflags +genpts+igndts",
+            "-probesize 524288 -analyzeduration 1000000",
+            "-f webm -i pipe:0",
+            "-map 0:v:0 -map 0:a:0?",
+            videoEncodingArgs,
+            "-c:a aac -b:a 256k -ar 48000 -ac 2",
+            "-af \"aresample=async=1000:first_pts=0\"",
+            "-avoid_negative_ts make_zero -max_interleave_delta 0 -muxdelay 0.05 -muxpreload 0.05 -flush_packets 1",
+            "-pat_period 0.25 -sdt_period 0.25 -mpegts_flags +initial_discontinuity+resend_headers -f mpegts pipe:1"
+        ]);
     }
 
     private async Task LoadExtensionAndPlaceWindowAsync(
@@ -779,6 +798,7 @@ public sealed class ChromeTuner
                   maxWidth: {{ViewportWidth}},
                   minHeight: {{ViewportHeight}},
                   maxHeight: {{ViewportHeight}},
+                  minFrameRate: 60,
                   maxFrameRate: 60
                 }
               }
@@ -818,7 +838,7 @@ public sealed class ChromeTuner
                 }
               };
 
-              activeRecorder.start(80);
+              activeRecorder.start(33);
             };
           } catch (err) {
             activeRecorder = null;

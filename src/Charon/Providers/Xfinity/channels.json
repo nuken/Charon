@@ -1,1 +1,331 @@
-﻿[]
+[
+  {
+    "id": "ktcadt-xf",
+    "name": "KTCA-DT",
+    "channelNumber": "1002",
+    "stationId": "21634",
+    "url": "https://www.xfinity.com/stream/live/tpt2H/8037961156532819105/tpt2H"
+  },
+  {
+    "id": "wccodt-xf",
+    "name": "WCCO-DT",
+    "channelNumber": "1004",
+    "stationId": "21234",
+    "url": "https://www.xfinity.com/stream/live/WCCOD/5669032547815822105/WCCOD"
+  },
+  {
+    "id": "kstpdt-xf",
+    "name": "KSTP-DT",
+    "channelNumber": "1005",
+    "stationId": "21236",
+    "url": "https://www.xfinity.com/stream/live/KSTPD/8713109229817176105/KSTPD"
+  },
+  {
+    "id": "kmspdt-xf",
+    "name": "KMSP-DT",
+    "channelNumber": "1009",
+    "stationId": "24504",
+    "url": "https://www.xfinity.com/stream/live/KMSPD/8615637520029897105/KMSPD"
+  },
+  {
+    "id": "karedt-xf",
+    "name": "KARE-DT",
+    "channelNumber": "1011",
+    "stationId": "20505",
+    "url": "https://www.xfinity.com/stream/live/KARED/7728061817102576105/KARED"
+  },
+  {
+    "id": "ktcidt3-xf",
+    "name": "KTCI-DT3",
+    "channelNumber": "1017",
+    "stationId": "21865",
+    "url": "https://www.xfinity.com/stream/live/TPTL/8037961156532819105/TPTL"
+  },
+  {
+    "id": "wucwdt-xf",
+    "name": "WUCW-DT",
+    "channelNumber": "1023",
+    "stationId": "34425",
+    "url": "https://www.xfinity.com/stream/live/WUCWD/7775115034909443105/WUCWD"
+  },
+  {
+    "id": "kpxmdt-xf",
+    "name": "KPXM-DT",
+    "channelNumber": "1041",
+    "stationId": "36071",
+    "url": "https://www.xfinity.com/stream/live/IONHD/8070479734704376105/IONHD"
+  },
+  {
+    "id": "cnnhd-xf",
+    "name": "CNN HD",
+    "channelNumber": "1111",
+    "stationId": "58646",
+    "url": "https://www.xfinity.com/stream/live/CNNHD/7551018075264600105/CNNHD"
+  },
+  {
+    "id": "kstcdt2-xf",
+    "name": "KSTC-DT2",
+    "channelNumber": "1167",
+    "stationId": "73502",
+    "url": "https://www.xfinity.com/stream/live/MeTV/4757730922757252105/MeTV"
+  },
+  {
+    "id": "kstcdt4-xf",
+    "name": "KSTC-DT4",
+    "channelNumber": "1168",
+    "stationId": "75977",
+    "url": "https://www.xfinity.com/stream/live/KSTC2/8760927753427221105/KSTC2"
+  },
+  {
+    "id": "wccodt2-xf",
+    "name": "WCCO-DT2",
+    "channelNumber": "1174",
+    "stationId": "92038",
+    "url": "https://www.xfinity.com/stream/live/START/8313187410358697105/START"
+  },
+  {
+    "id": "wucwdt2-xf",
+    "name": "WUCW-DT2",
+    "channelNumber": "1182",
+    "stationId": "52331",
+    "url": "https://www.xfinity.com/stream/live/COMET/6532506444970079105/COMET"
+  },
+  {
+    "id": "wucwdt3-xf",
+    "name": "WUCW-DT3",
+    "channelNumber": "1183",
+    "stationId": "69640",
+    "url": "https://www.xfinity.com/stream/live/CHARG/6872374361091213105/CHARG"
+  },
+  {
+    "id": "espnhd-xf",
+    "name": "ESPN HD",
+    "channelNumber": "1205",
+    "stationId": "32645",
+    "url": "https://www.xfinity.com/stream/live/ESPND/7642769970651506105/ESPND"
+  },
+  {
+    "id": "espn2hd-xf",
+    "name": "ESPN2 HD",
+    "channelNumber": "1206",
+    "stationId": "45507",
+    "url": "https://www.xfinity.com/stream/live/ES2HD/7642769970651506105/ES2HD"
+  },
+  {
+    "id": "fs1hd-xf",
+    "name": "FS1 HD",
+    "channelNumber": "1208",
+    "stationId": "82547",
+    "url": "https://www.xfinity.com/stream/live/FS1HD/5628918118244997105/FS1HD"
+  },
+  {
+    "id": "fs2hd-xf",
+    "name": "FS2 HD",
+    "channelNumber": "1209",
+    "stationId": "59305",
+    "url": "https://www.xfinity.com/stream/live/FS2/8827972050046699105/FS2"
+  },
+  {
+    "id": "golfchannelhd-xf",
+    "name": "Golf Channel HD",
+    "channelNumber": "1223",
+    "stationId": "61854",
+    "url": "https://www.xfinity.com/stream/live/GOLFD/7547469904399748105/GOLFD"
+  },
+  {
+    "id": "tennischannelhd-xf",
+    "name": "Tennis Channel HD",
+    "channelNumber": "1224",
+    "stationId": "60316",
+    "url": "https://www.xfinity.com/stream/live/TNND/5272992504836762105/TNND"
+  },
+  {
+    "id": "ballysportsnorthhd-xf",
+    "name": "Bally Sports North HD",
+    "channelNumber": "1250",
+    "stationId": "74436",
+    "url": "https://www.xfinity.com/stream/live/BSNRD/5676071061539263105/BSNRD"
+  },
+  {
+    "id": "bigtennetworkminnesotahd-xf",
+    "name": "Big Ten Network Minnesota HD",
+    "channelNumber": "1313",
+    "stationId": "58774",
+    "url": "https://www.xfinity.com/stream/live/B10HD/7916016111854078105/B10HD"
+  },
+  {
+    "id": "usanetworkhd-xf",
+    "name": "USA Network HD",
+    "channelNumber": "1403",
+    "stationId": "58452",
+    "url": "https://www.xfinity.com/stream/live/USAHD/6198908101479551105/USAHD"
+  },
+  {
+    "id": "tnthd-xf",
+    "name": "TNT HD",
+    "channelNumber": "1404",
+    "stationId": "42642",
+    "url": "https://www.xfinity.com/stream/live/TNTHD/5966517083150279105/TNTHD"
+  },
+  {
+    "id": "amchd-xf",
+    "name": "AMC HD",
+    "channelNumber": "1405",
+    "stationId": "59337",
+    "url": "https://www.xfinity.com/stream/live/AMCHD/8004546766543596105/AMCHD"
+  },
+  {
+    "id": "bbcamericahd-xf",
+    "name": "BBC America HD",
+    "channelNumber": "1418",
+    "stationId": "64492",
+    "url": "https://www.xfinity.com/stream/live/BBCAM/7159950156799115105/BBCAM"
+  },
+  {
+    "id": "trutvhd-xf",
+    "name": "truTV HD",
+    "channelNumber": "1430",
+    "stationId": "64490",
+    "url": "https://www.xfinity.com/stream/live/TRTVD/5197383487287436105/TRTVD"
+  },
+  {
+    "id": "tbshd-xf",
+    "name": "TBS HD",
+    "channelNumber": "1434",
+    "stationId": "58515",
+    "url": "https://www.xfinity.com/stream/live/TBSHD/6937726884423880105/TBSHD"
+  },
+  {
+    "id": "hallmarkchannelhd-xf",
+    "name": "Hallmark Channel HD",
+    "channelNumber": "1458",
+    "stationId": "66268",
+    "url": "https://www.xfinity.com/stream/live/HCHD/7889068523651137105/HCHD"
+  },
+  {
+    "id": "hallmarkmysteryhd-xf",
+    "name": "Hallmark Mystery HD",
+    "channelNumber": "1459",
+    "stationId": "46710",
+    "url": "https://www.xfinity.com/stream/live/HMYS/7889068523651137105/HMYS"
+  },
+  {
+    "id": "hbohd-xf",
+    "name": "HBO HD",
+    "channelNumber": "1802",
+    "stationId": "19548",
+    "url": "https://www.xfinity.com/stream/live/HBOHD/5232923399725817105/HBOHD"
+  },
+  {
+    "id": "hbopacific-xf",
+    "name": "HBO (PACIFIC)",
+    "channelNumber": "1803",
+    "stationId": "10244",
+    "url": "https://www.xfinity.com/stream/live/HBO-W/5232923399725817105/HBO-W"
+  },
+  {
+    "id": "hbohits-xf",
+    "name": "HBO Hits",
+    "channelNumber": "1804",
+    "stationId": "59368",
+    "url": "https://www.xfinity.com/stream/live/HBO2H/5232923399725817105/HBO2H"
+  },
+  {
+    "id": "hbodrama-xf",
+    "name": "HBO Drama",
+    "channelNumber": "1806",
+    "stationId": "10243",
+    "url": "https://www.xfinity.com/stream/live/HBOSG/5232923399725817105/HBOSG"
+  },
+  {
+    "id": "hbocomedy-xf",
+    "name": "HBO Comedy",
+    "channelNumber": "1810",
+    "stationId": "18429",
+    "url": "https://www.xfinity.com/stream/live/HBOCM/5232923399725817105/HBOCM"
+  },
+  {
+    "id": "hbomovies-xf",
+    "name": "HBO Movies",
+    "channelNumber": "1812",
+    "stationId": "18431",
+    "url": "https://www.xfinity.com/stream/live/HBOZN/5232923399725817105/HBOZN"
+  },
+  {
+    "id": "paramountpluswithshowtimehd-xf",
+    "name": "Paramount+ with Showtime HD",
+    "channelNumber": "1840",
+    "stationId": "21868",
+    "url": "https://www.xfinity.com/stream/live/SHOHD/6578292319676893105/SHOHD"
+  },
+  {
+    "id": "sho2e-xf",
+    "name": "SHO2e",
+    "channelNumber": "1842",
+    "stationId": "11116",
+    "url": "https://www.xfinity.com/stream/live/SHO2e/6578292319676893105/SHO2e"
+  },
+  {
+    "id": "showtimeshowcase-xf",
+    "name": "Showtime Showcase",
+    "channelNumber": "1846",
+    "stationId": "16153",
+    "url": "https://www.xfinity.com/stream/live/SHOCe/6578292319676893105/SHOCe"
+  },
+  {
+    "id": "showtimeextreme-xf",
+    "name": "Showtime Extreme",
+    "channelNumber": "1848",
+    "stationId": "18086",
+    "url": "https://www.xfinity.com/stream/live/SHOXe/6578292319676893105/SHOXe"
+  },
+  {
+    "id": "showtimefamilyzone-xf",
+    "name": "Showtime Familyzone",
+    "channelNumber": "1852",
+    "stationId": "25274",
+    "url": "https://www.xfinity.com/stream/live/SHOFe/6578292319676893105/SHOFe"
+  },
+  {
+    "id": "themoviechannelhd-xf",
+    "name": "The Movie Channel HD",
+    "channelNumber": "1860",
+    "stationId": "35329",
+    "url": "https://www.xfinity.com/stream/live/TMCHD/9102031849685959105/TMCHD"
+  },
+  {
+    "id": "themoviechannelextrahd-xf",
+    "name": "The Movie Channel Extra HD",
+    "channelNumber": "1862",
+    "stationId": "60951",
+    "url": "https://www.xfinity.com/stream/live/TMCXe/9102031849685959105/TMCXe"
+  },
+  {
+    "id": "mgmplushd-xf",
+    "name": "MGM+ HD",
+    "channelNumber": "1871",
+    "stationId": "65687",
+    "url": "https://www.xfinity.com/stream/live/MGM+/7697030199876428105/MGM+"
+  },
+  {
+    "id": "mgmplushitshd-xf",
+    "name": "MGM+ Hits HD",
+    "channelNumber": "1873",
+    "stationId": "67929",
+    "url": "https://www.xfinity.com/stream/live/MGMHT/7697030199876428105/MGMHT"
+  },
+  {
+    "id": "mgmplusmarqueehd-xf",
+    "name": "MGM+ Marquee HD",
+    "channelNumber": "1874",
+    "stationId": "74073",
+    "url": "https://www.xfinity.com/stream/live/MGMMR/7697030199876428105/MGMMR"
+  },
+  {
+    "id": "mgmplusdriveinhd-xf",
+    "name": "MGM+ Drive-In HD",
+    "channelNumber": "1875",
+    "stationId": "103828",
+    "url": "https://www.xfinity.com/stream/live/MGMDR/7697030199876428105/MGMDR"
+  }
+]

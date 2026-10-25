@@ -75,6 +75,7 @@
             <WrapPanel VerticalAlignment="Center">
                 <TextBlock Text="Encoder:" VerticalAlignment="Center" Margin="0,0,8,0"/>
                 <ComboBox x:Name="CmbEncoder" Width="120" Height="28" Margin="0,0,16,0" SelectionChanged="Settings_Changed">
+                    <ComboBoxItem Content="copy"/>
                     <ComboBoxItem Content="h264_nvenc"/>
                     <ComboBoxItem Content="h264_qsv"/>
                     <ComboBoxItem Content="h264_amf"/>
