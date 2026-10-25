@@ -509,13 +509,12 @@ public class ChannelSyncService
             return JSON.stringify([]);
           }
 
-          // Group by callSign so we deduplicate SD/HD/ToGo duplicates and prefer the 1000-1999 HD tier!
           const bestByCallSign = new Map();
 
           const scoreChannel = (c) => {
             const num = Number(c.number || 0);
             let score = 0;
-            if (num >= 1000 && num <= 1999) score += 100; // Prefer 1000-1999 HD tier per bnhf
+            if (num >= 1000 && num <= 1999) score += 100;
             if (c.isHD) score += 50;
             if (!Array.isArray(c.restrictStreaming) || !c.restrictStreaming.includes('out-of-home')) score += 10;
             return score;
@@ -528,10 +527,17 @@ public class ChannelSyncService
             if (!callSign || !companyId) continue;
 
             const hint = String(c.callSignVoiceOverHint || '').trim();
-            // Skip Music Choice audio channels
-            if (/^music choice/i.test(hint) || /^mc\d+$/i.test(callSign) || /^~mc/i.test(callSign)) continue;
+            const upperHint = hint.toUpperCase();
+            const upperCall = callSign.toUpperCase();
 
-            const key = callSign.toUpperCase();
+            // Aggressively filter out Music Choice, Xumo/FAST, and Local Public Access junk
+            if (/^MUSIC CHOICE/i.test(hint) || /^MC\d+$/.test(upperCall) || /^~MC/.test(upperCall)) continue;
+            if (upperHint === 'XUMO PLAY' || upperCall.includes('XUMO') || upperCall.startsWith('FAST')) continue;
+            if (upperHint.includes('LOCAL PROGRAMMING') || upperCall.includes('LOCAL')) continue;
+            if (upperHint.includes('PUBLIC AFFAIRS') || upperCall.includes('PUBLIC')) continue;
+            if (upperCall.includes('EVENTS') || upperHint.includes('SPECIALS AND EVENTS')) continue;
+
+            const key = upperCall;
             const existing = bestByCallSign.get(key);
             if (!existing || scoreChannel(c) > scoreChannel(existing)) {
               bestByCallSign.set(key, c);
@@ -546,15 +552,21 @@ public class ChannelSyncService
             const callSign = String(c.callSign).trim();
             const companyId = String(c.companyId || c.networkAffiliateCompanyId).trim();
             const num = String(c.number || results.length + 1);
+            
+            // If the hint is overly generic (e.g., just "HBO"), append the callSign so the user can tell them apart in the raw JSON
             const hint = String(c.callSignVoiceOverHint || '').trim();
-            const displayName = hint || callSign;
+            let displayName = hint || callSign;
+            if (['HBO', 'SHOWTIME', 'CINEMAX', 'STARZ', 'MGM+'].includes(hint.toUpperCase()) && callSign.toUpperCase() !== hint.toUpperCase()) {
+                displayName = `${hint} (${callSign})`;
+            }
+
             const safeId = callSign.toLowerCase().replace(/[^a-z0-9]+/g, '') + '-xf';
 
             results.push({
               Id: safeId,
               Name: displayName,
               ChannelNumber: num,
-              StationId: '', // Leave empty so Channels DVR resolves real Gracenote StationId!
+              StationId: '',
               Url: `https://www.xfinity.com/stream/live/${encodeURIComponent(callSign)}/${companyId}/${encodeURIComponent(callSign)}`
             });
           }
@@ -585,18 +597,19 @@ public class ChannelSyncService
             }
 
             string rawName = ch.Name.Trim();
-            List<TmsStation>? results = await QueryChannelsDvrTmsAsync(serverUrl, rawName);
+            List<TmsStation>? results = null;
 
-            // If this is an Xfinity URL (/stream/live/{callSign}/{companyId}/{callSign}), also try querying by the URL's callSign!
+            // 1. For Xfinity, the URL callSign (e.g., HBOSG, SHO2e, ESPNU) is infinitely more accurate than the generic display name.
             var xfMatch = System.Text.RegularExpressions.Regex.Match(ch.Url ?? "", @"/stream/live/([^/]+)/\d+/");
             string? urlCallSign = xfMatch.Success ? Uri.UnescapeDataString(xfMatch.Groups[1].Value) : null;
 
-            if ((results is null || results.Count == 0) && !string.IsNullOrWhiteSpace(urlCallSign))
+            if (!string.IsNullOrWhiteSpace(urlCallSign))
             {
                 results = await QueryChannelsDvrTmsAsync(serverUrl, urlCallSign);
+
                 if (results is null || results.Count == 0)
                 {
-                    // Strip trailing HD/D (e.g. "WCCOD" -> "WCCO", "CNNHD" -> "CNN")
+                    // Strip trailing HD/D (e.g. "CNNHD" -> "CNN", "HGTVD" -> "HGTV")
                     string cleanCs = System.Text.RegularExpressions.Regex.Replace(urlCallSign, @"(?:HD|DT\d*|D)$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                     if (cleanCs.Length >= 3 && !string.Equals(cleanCs, urlCallSign, StringComparison.OrdinalIgnoreCase))
                     {
@@ -605,13 +618,27 @@ public class ChannelSyncService
                 }
             }
 
-            // Tier 3: First word if multi-word (e.g., "WCNC NBC" -> "WCNC")
-            if ((results is null || results.Count == 0) && rawName.Contains(' '))
+            // 2. Fallback to the display name if callSign lookups failed (or if it is YouTube TV / Spectrum)
+            if (results is null || results.Count == 0)
             {
-                string firstWord = rawName.Split(' ')[0];
-                if (firstWord.Length >= 3)
+                results = await QueryChannelsDvrTmsAsync(serverUrl, rawName);
+
+                if (results is null || results.Count == 0)
                 {
-                    results = await QueryChannelsDvrTmsAsync(serverUrl, firstWord);
+                    string stripped = System.Text.RegularExpressions.Regex.Replace(rawName, @"\s+\d+$", "");
+                    if (!string.Equals(stripped, rawName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        results = await QueryChannelsDvrTmsAsync(serverUrl, stripped);
+                    }
+                }
+
+                if ((results is null || results.Count == 0) && rawName.Contains(' '))
+                {
+                    string firstWord = rawName.Split(' ')[0];
+                    if (firstWord.Length >= 3)
+                    {
+                        results = await QueryChannelsDvrTmsAsync(serverUrl, firstWord);
+                    }
                 }
             }
 
@@ -620,7 +647,8 @@ public class ChannelSyncService
                 var match = results.FirstOrDefault(r =>
                     (!string.IsNullOrWhiteSpace(r.CallSign) &&
                      (string.Equals(System.Text.RegularExpressions.Regex.Replace(r.CallSign, @"DT\d*$", ""), rawName, StringComparison.OrdinalIgnoreCase) ||
-                      r.CallSign.StartsWith(rawName, StringComparison.OrdinalIgnoreCase))) ||
+                      r.CallSign.StartsWith(rawName, StringComparison.OrdinalIgnoreCase) ||
+                      (!string.IsNullOrWhiteSpace(urlCallSign) && r.CallSign.StartsWith(urlCallSign, StringComparison.OrdinalIgnoreCase)))) ||
                     (!string.IsNullOrWhiteSpace(r.Name) && r.Name.Contains(rawName, StringComparison.OrdinalIgnoreCase)))
                     ?? results[0];
 
