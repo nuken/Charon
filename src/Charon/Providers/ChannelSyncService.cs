@@ -389,7 +389,7 @@ public class ChannelSyncService
               const href = anchor ? (anchor.getAttribute("href") || "") : "";
               if ((href.startsWith("watch/") || href.startsWith("/watch/")) && !seen.has(name)) {
                 seen.add(name);
-                const cleanHref = href.replace(/^\//, '');
+                const cleanHref = href.replace(/^\//, '').split('?')[0];
                 const safeId = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
                 list.push({
                   Id: safeId,
