@@ -18,8 +18,7 @@ public class CharonConfig
 {
     public string LanIp { get; set; } = "auto";
     public int Port { get; set; } = 48590;
-    public string ChromePath { get; set; } = "auto";
-    public string VideoEncoder { get; set; } = "copy"; // copy, h264_nvenc, h264_qsv, h264_amf, libx264
+    public string ChromePath { get; set; } = "auto";    
     public string VideoBitrate { get; set; } = "8M";
     public int MaxConcurrentTuners { get; set; } = 2;
     public bool Enable1080p { get; set; } = false;

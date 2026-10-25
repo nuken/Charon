@@ -312,24 +312,8 @@ public sealed class ChromeTuner
         }
     }
 	
-	private string BuildFfmpegArguments()
+	private static string BuildFfmpegArguments()
     {
-        string encoder = (_config.VideoEncoder ?? "copy").Trim().ToLowerInvariant();
-        string targetBitrate = _config.Enable1080p ? "15M" : "10M";
-        string maxRate = _config.Enable1080p ? "18M" : "12M";
-        string bufSize = _config.Enable1080p ? "36M" : "24M";
-
-        string videoEncodingArgs = encoder switch
-        {
-            "h264_nvenc" => $"-fps_mode cfr -r 60 -c:v h264_nvenc -preset p4 -tune ll -rc vbr -b:v {targetBitrate} -maxrate {maxRate} -bufsize {bufSize} -g 120 -bf 0",
-            "h264_qsv"   => $"-fps_mode cfr -r 60 -c:v h264_qsv -preset veryfast -global_quality 21 -maxrate {maxRate} -bufsize {bufSize} -g 120 -bf 0",
-            "h264_amf"   => $"-fps_mode cfr -r 60 -c:v h264_amf -quality balanced -rc vbr_peak -b:v {targetBitrate} -maxrate {maxRate} -bufsize {bufSize} -g 120 -bf 0",
-            "libx264"    => $"-fps_mode cfr -r 60 -c:v libx264 -preset superfast -tune zerolatency -crf 20 -maxrate {maxRate} -bufsize {bufSize} -g 120 -bf 0",
-            _            => "-fps_mode passthrough -c:v copy -bsf:v h264_mp4toannexb,dump_extra"
-        };
-
-        // Removed "+nobuffer" from -fflags and added "-use_wallclock_as_timestamps 0"
-        // plus a 64KB MPEG-TS muxrate ceiling smoothing buffer so WebM cluster bursts don't cause micro-stutter!
         return string.Join(" ",
         [
             "-hide_banner -loglevel warning",
@@ -337,7 +321,7 @@ public sealed class ChromeTuner
             "-probesize 524288 -analyzeduration 1000000",
             "-f webm -i pipe:0",
             "-map 0:v:0 -map 0:a:0?",
-            videoEncodingArgs,
+            "-fps_mode passthrough -c:v copy -bsf:v h264_mp4toannexb,dump_extra",
             "-c:a aac -b:a 256k -ar 48000 -ac 2",
             "-af \"aresample=async=1000:first_pts=0\"",
             "-avoid_negative_ts make_zero -max_interleave_delta 0 -muxdelay 0.05 -muxpreload 0.05 -flush_packets 1",
@@ -860,6 +844,15 @@ public sealed class ChromeTuner
         string tunerDir = GetTunerProfilePath(tunerId);
         KillChromeProcessesForPortOrProfile(debugPort, tunerDir);
         TryDeleteFile(Path.Combine(tunerDir, "SingletonLock"));
+
+        // Clear cached extension service workers so Chrome always runs the latest offscreen.js / background.js!
+        try
+        {
+            string swCache = Path.Combine(tunerDir, "Default", "Service Worker");
+            if (Directory.Exists(swCache))
+                Directory.Delete(swCache, recursive: true);
+        }
+        catch { }
 
         if (tunerId == 1)
             return tunerDir;
