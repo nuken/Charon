@@ -151,17 +151,17 @@ public class ChannelSyncService
             }
             else
             {
-                // YouTube TV: Wait for initial guide grid, then scroll using real CDP hardware mouseWheel events
-                var allChannels = new List<ProviderChannel>();
-                var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                int msgId = 1;
-                var waitDeadline = DateTime.UtcNow.AddSeconds(25);
-                bool gridReady = false;
+                // YouTube TV: Wait for <ytu-epg-row> data models to mount and auto-scroll #id-bottom-main-content
+                string yttvJs = GetYouTubeTvScraperJs();
+                var deadline = DateTime.UtcNow.AddSeconds(45);
+                int attempt = 0;
 
-                while (DateTime.UtcNow < waitDeadline)
+                while (DateTime.UtcNow < deadline)
                 {
-                    statusCallback("Step 1/2: Waiting for YouTube TV live guide grid to load...");
-                    string? res = await EvaluateJsStringAsync(ws, msgId++, GetYouTubeTvScraperJs());
+                    attempt++;
+                    statusCallback($"Step 1/2: Waiting for YouTube TV live guide (<ytu-epg-row>) to load and harvest (attempt {attempt})...");
+                    string? res = await EvaluateJsStringAsync(ws, attempt, yttvJs);
+
                     if (!string.IsNullOrWhiteSpace(res))
                     {
                         if (res.StartsWith("{\"status\":", StringComparison.Ordinal))
@@ -170,79 +170,16 @@ public class ChannelSyncService
                         }
                         else if (res.StartsWith("[", StringComparison.Ordinal) && res != "[]")
                         {
-                            var batch = ProviderManager.ParseChannelsJson(res);
-                            if (batch.Count > 0)
-                            {
-                                gridReady = true;
-                                foreach (var ch in batch)
-                                {
-                                    if (seenNames.Add(ch.Name))
-                                    {
-                                        ch.ChannelNumber = (allChannels.Count + 1).ToString();
-                                        allChannels.Add(ch);
-                                    }
-                                }
-                                break;
-                            }
-                        }
-                    }
-                    await Task.Delay(1200);
-                }
-
-                if (!gridReady)
-                    return [];
-
-                // Now dispatch real CDP mouseWheel + PageDown events to scroll through the entire virtualized guide
-                int stagnantPasses = 0;
-                for (int scrollStep = 1; scrollStep <= 45; scrollStep++)
-                {
-                    statusCallback($"Step 1/2: Scrolling YouTube TV guide... ({allChannels.Count} channels found so far)");
-
-                    // Send 3 hardware mouseWheel ticks down at the center of the guide (x=640, y=550)
-                    for (int w = 0; w < 3; w++)
-                    {
-                        await SendCdpCommandAsync(ws, msgId++, "Input.dispatchMouseEvent", new
-                        {
-                            type = "mouseWheel",
-                            x = 640,
-                            y = 550,
-                            deltaX = 0,
-                            deltaY = 700
-                        });
-                        await Task.Delay(90);
-                    }
-
-                    await Task.Delay(250);
-
-                    string? batchJson = await EvaluateJsStringAsync(ws, msgId++, GetYouTubeTvScraperJs());
-                    int beforeCount = allChannels.Count;
-
-                    if (!string.IsNullOrWhiteSpace(batchJson) && batchJson.StartsWith("[", StringComparison.Ordinal))
-                    {
-                        var batch = ProviderManager.ParseChannelsJson(batchJson);
-                        foreach (var ch in batch)
-                        {
-                            if (seenNames.Add(ch.Name))
-                            {
-                                ch.ChannelNumber = (allChannels.Count + 1).ToString();
-                                allChannels.Add(ch);
-                            }
+                            var parsed = ProviderManager.ParseChannelsJson(res);
+                            if (parsed.Count > 0)
+                                return parsed;
                         }
                     }
 
-                    if (allChannels.Count == beforeCount)
-                    {
-                        stagnantPasses++;
-                        if (stagnantPasses >= 5)
-                            break;
-                    }
-                    else
-                    {
-                        stagnantPasses = 0;
-                    }
+                    await Task.Delay(1500);
                 }
 
-                return allChannels;
+                return [];
             }
         }
         finally
@@ -355,7 +292,7 @@ public class ChannelSyncService
     }
 
     private static string GetYouTubeTvScraperJs() => """
-        (() => {
+        (async () => {
           if (location.pathname.includes('/welcome')) {
             return JSON.stringify({ status: 'not_logged_in', url: location.href });
           }
@@ -365,48 +302,80 @@ public class ChannelSyncService
             return JSON.stringify({ status: 'navigating_to_live', url: location.href });
           }
 
-          const list = [];
-          const seen = new Set();
-          let chNum = 1;
+          const container = document.querySelector('#id-bottom-main-content') 
+            || document.querySelector('.bottom-main-content');
+          const initialRows = document.querySelectorAll('ytu-epg-row');
 
-          const queryAllDeep = (selector, root = document) => {
-            const results = Array.from(root.querySelectorAll(selector));
-            const allElements = root.querySelectorAll('*');
-            for (const el of allElements) {
-              if (el.shadowRoot) {
-                results.push(...queryAllDeep(selector, el.shadowRoot));
-              }
-            }
-            return results;
-          };
-
-          const thumbs = queryAllDeep("ytu-endpoint.tenx-thumb[aria-label], [aria-label^='watch ']");
-          thumbs.forEach(thumb => {
-            const label = thumb.getAttribute("aria-label") || "";
-            if (label.startsWith("watch ")) {
-              const name = label.slice(6).trim();
-              const anchor = thumb.tagName.toLowerCase() === 'a' ? thumb : thumb.querySelector("a");
-              const href = anchor ? (anchor.getAttribute("href") || "") : "";
-              if ((href.startsWith("watch/") || href.startsWith("/watch/")) && !seen.has(name)) {
-                seen.add(name);
-                const cleanHref = href.replace(/^\//, '').split('?')[0];
-                const safeId = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-                list.push({
-                  Id: safeId,
-                  Name: name,
-                  ChannelNumber: String(chNum++),
-                  StationId: "",
-                  Url: `https://tv.youtube.com/${cleanHref}`
-                });
-              }
-            }
-          });
-
-          if (list.length === 0) {
+          if (!container || initialRows.length === 0) {
             return JSON.stringify({ status: 'waiting_for_grid', url: location.href, title: document.title });
           }
 
-          return JSON.stringify(list);
+          // Ensure Polymer has populated .data on the mounted rows before starting the scroll pass
+          const firstData = initialRows[0]?.data;
+          if (!firstData || (!firstData.station && !firstData.navigationEndpoint)) {
+            return JSON.stringify({ status: 'waiting_for_polymer_data', url: location.href });
+          }
+
+          const channels = new Map();
+          let lastTop = -1;
+          let stagnantPasses = 0;
+          const maxPasses = 120;
+          let chNum = 1;
+
+          container.scrollTop = 0;
+          await new Promise(r => setTimeout(r, 200));
+
+          for (let i = 0; i < maxPasses; i++) {
+            const rows = container.querySelectorAll('ytu-epg-row');
+
+            for (const r of rows) {
+              const d = r.data || {};
+              const st = d.station?.epgStationRenderer || {};
+
+              const ep = d.navigationEndpoint?.watchEndpoint 
+                || st.navigationEndpoint?.watchEndpoint 
+                || d.airings?.[0]?.navigationEndpoint?.watchEndpoint;
+              const videoId = ep?.videoId;
+
+              if (!videoId) continue;
+
+              // Key by permanent YouTube stationId (UC...) so duplicate display names (e.g. PBS NC, ESPN)
+              // stay separate and M3U channel-id stays permanent across program changes
+              const ytStationId = d.stationId || st.stationId || videoId;
+              if (channels.has(ytStationId)) continue;
+
+              const name = st.name?.runs?.[0]?.text 
+                || st.callSign?.runs?.[0]?.text
+                || st.icon?.accessibility?.accessibilityData?.label
+                || r.getAttribute('aria-label')?.replace(/^watch\s+/i, '').trim()
+                || ytStationId;
+
+              const safeSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+              const shortHash = ytStationId.length > 6 ? ytStationId.slice(-6).toLowerCase() : ytStationId.toLowerCase();
+
+              channels.set(ytStationId, {
+                Id: `${safeSlug}-${shortHash}`,
+                Name: name,
+                ChannelNumber: String(chNum++),
+                StationId: "",
+                Url: `https://tv.youtube.com/watch/${videoId}`
+              });
+            }
+
+            container.scrollTop += 650;
+            await new Promise(r => setTimeout(r, 120));
+
+            if (container.scrollTop === lastTop) {
+              stagnantPasses++;
+              if (stagnantPasses >= 3) break;
+            } else {
+              stagnantPasses = 0;
+              lastTop = container.scrollTop;
+            }
+          }
+
+          container.scrollTop = 0;
+          return JSON.stringify(Array.from(channels.values()));
         })()
         """;
 
@@ -509,55 +478,125 @@ public class ChannelSyncService
             return JSON.stringify([]);
           }
 
-          const bestByCallSign = new Map();
+          // Clean HD/SD suffixes only when the base callSign remains >= 3 chars (protects ID, WE, E!, FX)
+          const normalizeCallSign = (cs) => {
+            const clean = String(cs || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+            const stripped = clean.replace(/(?:HD|DT\d*|D|H)$/, '');
+            return stripped.length >= 3 ? stripped : clean;
+          };
+
+          // Map known sister channels that share a parent companyId into distinct sub-keys
+          const getSisterSubKey = (upperCall) => {
+            // ESPN family (all share companyId 7642769970651506105)
+            if (['ESPN2', 'ES2HD'].includes(upperCall)) return 'ESPN2';
+            if (['ESPNN', 'ESWHD', 'ESPNEWS'].includes(upperCall)) return 'ESPNEWS';
+            if (upperCall.startsWith('ESPNU')) return 'ESPNU';
+            if (upperCall.startsWith('ESPN')) return 'ESPN';
+
+            // Hallmark family (all share companyId 7889068523651137105)
+            if (['HMYS', 'HMYSD'].includes(upperCall)) return 'HMYS';
+            if (['HFM', 'HFMSD'].includes(upperCall)) return 'HFM';
+            if (['HLMRK', 'HCHD'].includes(upperCall)) return 'HLMRK';
+
+            // Nickelodeon family (share companyId 7294331549102474105)
+            if (upperCall === 'NTOON') return 'NTOON';
+            if (['NICM', 'NICK2'].includes(upperCall)) return 'NICK2';
+
+            return null;
+          };
 
           const scoreChannel = (c) => {
             const num = Number(c.number || 0);
             let score = 0;
-            if (num >= 1000 && num <= 1999) score += 100;
-            if (c.isHD) score += 50;
-            if (!Array.isArray(c.restrictStreaming) || !c.restrictStreaming.includes('out-of-home')) score += 10;
+            // Strongly prefer the primary 1000-1899 HD tier
+            if (num >= 1000 && num <= 1899) score += 500;
+            if (c.isHD) score += 100;
+            if (!Array.isArray(c.restrictStreaming) || !c.restrictStreaming.includes('out-of-home')) score += 20;
             return score;
           };
 
+          const bestByNetwork = new Map();
+
           for (const c of rawChannels) {
             if (!c || c.entitled === false) continue;
-            const callSign = String(c.callSign || '').trim();
+
+            const num = Number(c.number || 0);
+            // Keep only core linear channels (1-1899); drops 3000+ international, 10000+ duplicates, 13000+ League Pass, 14000+ FAST
+            if (num <= 0 || num > 1899) continue;
+
+            // Drop local OTA subchannel diginets (1150-1195: MeTV, Buzzr, Catchy, Story, Grit, Comet, Charge, PBS Kids/Create)
+            // Remove this single line if you WANT local OTA subchannels included
+            if (num >= 1150 && num <= 1195) continue;
+
+            const rawCall = String(c.callSign || '').trim();
             const companyId = String(c.companyId || c.networkAffiliateCompanyId || '').trim();
-            if (!callSign || !companyId) continue;
+            if (!rawCall || !companyId) continue;
 
             const hint = String(c.callSignVoiceOverHint || '').trim();
             const upperHint = hint.toUpperCase();
-            const upperCall = callSign.toUpperCase();
+            const upperCall = rawCall.toUpperCase();
 
-            // Aggressively filter out Music Choice, Xumo/FAST, and Local Public Access junk
-            if (/^MUSIC CHOICE/i.test(hint) || /^MC\d+$/.test(upperCall) || /^~MC/.test(upperCall)) continue;
+            // 1. Filter out Sports Overflow, League Pass, and Extra Innings
+            if (upperCall.endsWith('LP') || /^BTFB\d/i.test(upperCall) || upperHint.includes('LEAGUE PASS')) continue;
+
+            // 2. Filter out Music Choice, FAST, Xumo, Local/Public Access, and ScreenPix barkers
+            if (/^MUSIC CHOICE/i.test(upperHint) || /^MC\d+$/.test(upperCall) || upperCall.startsWith('~MC')) continue;
             if (upperHint === 'XUMO PLAY' || upperCall.includes('XUMO') || upperCall.startsWith('FAST')) continue;
-            if (upperHint.includes('LOCAL PROGRAMMING') || upperCall.includes('LOCAL')) continue;
-            if (upperHint.includes('PUBLIC AFFAIRS') || upperCall.includes('PUBLIC')) continue;
+            if (upperHint.includes('LOCAL PROGRAMMING') || upperHint.includes('LOCAL NEWS AND WEATHER')) continue;
+            if (upperHint.includes('PUBLIC AFFAIRS') || upperHint.includes('PUBLIC ACCESS') || upperHint.includes('PEG')) continue;
             if (upperCall.includes('EVENTS') || upperHint.includes('SPECIALS AND EVENTS')) continue;
+            if (upperHint.includes('SCREENPIX') || upperCall.startsWith('SCPX') || upperCall.startsWith('SPX')) continue;
+            if (upperHint.includes('ENTERTAINMENT STUDIOS')) continue; // JusticeCentral/Recipe.TV/Comedy.TV fillers
 
-            const key = upperCall;
-            const existing = bestByCallSign.get(key);
+            // 3. Filter out Shopping, Jewelry & Religious networks
+            if (/^(?:QVC|HSN|JTV|SHPLC|SHOPL|GEMS)/i.test(upperCall)) continue;
+            if (upperHint.includes('SHOPPING') || upperHint.includes('QVC') || upperHint.includes('HSN') || upperHint.includes('JEWELRY') || upperHint.includes('GEMSTONE')) continue;
+            if (['TBN', 'TBNHD', 'EWTN', 'EWTNH', 'GLC', 'SBN', 'WHMB', 'POSTV', 'KONCS', 'KONCH', 'INSPD', 'IMPCT', 'JBSHD', 'FETVH', 'NTD24'].includes(upperCall)) continue;
+            if (upperHint.includes('TRINITY BROADCASTING') || upperHint.includes('CHRISTIAN') || upperHint.includes('GOD TV') || upperHint.includes('ETERNAL WORD')) continue;
+
+            // 4. Determine deduplication key:
+            // Because Xfinity gives SD (COM/HIST/NGEO) and HD (CMDYD/HISHD/NGCHD) the exact same companyId,
+            // keying by companyId automatically merges SD + HD pairs!
+            const isPremium = /^(?:HBO|SHO|PSHO|STZ|MAX|ENC|TMC|MGM|FLIX)/i.test(upperCall);
+            const sisterKey = getSisterSubKey(upperCall);
+
+            let mapKey;
+            if (sisterKey) {
+              mapKey = `SISTER_${sisterKey}`;
+            } else if (isPremium) {
+              // Collapse only exact SD/HD pairs of the same premium feed (e.g. HBO-E + HBOHD, HBO2 + HBO2H, TMCe + TMCHD)
+              mapKey = `PREM_${normalizeCallSign(upperCall)}`;
+            } else {
+              mapKey = `COMP_${companyId}`;
+            }
+
+            const existing = bestByNetwork.get(mapKey);
             if (!existing || scoreChannel(c) > scoreChannel(existing)) {
-              bestByCallSign.set(key, c);
+              bestByNetwork.set(mapKey, c);
             }
           }
 
           const results = [];
-          const sorted = Array.from(bestByCallSign.values())
+          const sorted = Array.from(bestByNetwork.values())
             .sort((a, b) => Number(a.number || 99999) - Number(b.number || 99999));
 
           for (const c of sorted) {
             const callSign = String(c.callSign).trim();
+            const upperCall = callSign.toUpperCase();
             const companyId = String(c.companyId || c.networkAffiliateCompanyId).trim();
             const num = String(c.number || results.length + 1);
-            
-            // If the hint is overly generic (e.g., just "HBO"), append the callSign so the user can tell them apart in the raw JSON
+
             const hint = String(c.callSignVoiceOverHint || '').trim();
             let displayName = hint || callSign;
-            if (['HBO', 'SHOWTIME', 'CINEMAX', 'STARZ', 'MGM+'].includes(hint.toUpperCase()) && callSign.toUpperCase() !== hint.toUpperCase()) {
-                displayName = `${hint} (${callSign})`;
+
+            // Clean up shared parent voiceover names so Channels DVR and the user see the true channel name
+            if (['ESPN2', 'ES2HD'].includes(upperCall)) displayName = 'ESPN2';
+            else if (['ESPNN', 'ESWHD'].includes(upperCall)) displayName = 'ESPNews';
+            else if (['HMYS', 'HMYSD'].includes(upperCall)) displayName = 'Hallmark Mystery';
+            else if (['HFM', 'HFMSD'].includes(upperCall)) displayName = 'Hallmark Family';
+            else if (upperCall === 'NTOON') displayName = 'Nicktoons';
+            else if (['HBO', 'SHOWTIME', 'PARAMOUNT+ WITH SHOWTIME', 'CINEMAX', 'STARZ', 'MGM+', 'THE MOVIE CHANNEL'].includes(hint.toUpperCase()) && upperCall !== hint.toUpperCase()) {
+              displayName = `${hint} (${callSign})`;
             }
 
             const safeId = callSign.toLowerCase().replace(/[^a-z0-9]+/g, '') + '-xf';
@@ -574,7 +613,7 @@ public class ChannelSyncService
           return JSON.stringify(results);
         })()
         """;
-
+		
     private static async Task<int> MatchGracenoteStationsAsync(
         List<ProviderChannel> channels,
         string dvrIp,
