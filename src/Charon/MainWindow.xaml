@@ -111,45 +111,150 @@
             </TabItem>
 
             <TabItem Header="  Channel Lineup Editor (channels.json)  " FontWeight="SemiBold">
-                <Grid Background="#18181B" Margin="8">
+                <Grid Background="#18181B" Margin="10">
                     <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <!-- Editor Action Toolbar -->
-                    <WrapPanel Grid.Row="0" Margin="0,0,0,10" VerticalAlignment="Center">
-                        <Button Content="2. Scan &amp; Sync Lineup..." Click="BtnScanLineup_Click"
-                                Padding="12,6" Background="#0284C7" Foreground="White" FontWeight="SemiBold" BorderThickness="0" Margin="0,0,8,0"/>
-                        <Button Content="Upload / Import JSON..." Click="BtnImportChannels_Click"
-                                Padding="12,6" Background="#3F3F46" Foreground="White" FontWeight="SemiBold" BorderThickness="0" Margin="0,0,8,0"/>
-                        <Button Content="Export JSON Backup..." Click="BtnExportChannels_Click"
-                                Padding="12,6" Background="#3F3F46" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
-                        <Button Content="+ Add Channel" Click="BtnAddChannelRow_Click"
-                                Padding="12,6" Background="#3F3F46" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
-                        <Button Content="- Delete Selected" Click="BtnDeleteChannelRow_Click"
-                                Padding="12,6" Background="#7F1D1D" Foreground="White" BorderThickness="0" Margin="0,0,8,0"/>
-                        <CheckBox x:Name="ChkRawJsonMode" Content="Raw JSON View" Foreground="#E4E4E7" VerticalAlignment="Center"
-                                  Margin="6,0,14,0" Checked="ChkRawJsonMode_Changed" Unchecked="ChkRawJsonMode_Changed"/>
-                        <Button Content="Save Changes to channels.json" Click="BtnSaveChannels_Click"
-                                Padding="14,6" Background="#16A34A" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
-                    </WrapPanel>
+                    <!-- Top Row: Primary Actions & Save -->
+                    <Grid Grid.Row="0" Margin="0,0,0,8">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
 
-                    <!-- Interactive DataGrid View -->
-                    <DataGrid x:Name="GridChannels" Grid.Row="1" AutoGenerateColumns="False" CanUserAddRows="True" CanUserDeleteRows="True"
-                              Background="#09090B" Foreground="#18181B" RowBackground="#F4F4F5" AlternatingRowBackground="#E4E4E7"
-                              GridLinesVisibility="All" HeadersVisibility="Column" FontSize="13">
+                        <WrapPanel Grid.Column="0" VerticalAlignment="Center">
+                            <Button Content="2. Scan &amp; Sync Lineup..." Click="BtnScanLineup_Click"
+                                    Padding="12,6" Background="#0284C7" Foreground="White" FontWeight="SemiBold" BorderThickness="0" Margin="0,0,8,0"/>
+                            <Button Content="Import JSON..." Click="BtnImportChannels_Click"
+                                    Padding="10,6" Background="#27272A" Foreground="#E4E4E7" BorderBrush="#3F3F46" BorderThickness="1" Margin="0,0,6,0"/>
+                            <Button Content="Export Backup..." Click="BtnExportChannels_Click"
+                                    Padding="10,6" Background="#27272A" Foreground="#E4E4E7" BorderBrush="#3F3F46" BorderThickness="1" Margin="0,0,6,0"/>
+                            <Button Content="+ Add" Click="BtnAddChannelRow_Click"
+                                    Padding="10,6" Background="#27272A" Foreground="#E4E4E7" BorderBrush="#3F3F46" BorderThickness="1" Margin="0,0,6,0"/>
+                            <Button Content="- Delete" Click="BtnDeleteChannelRow_Click"
+                                    Padding="10,6" Background="#450A0A" Foreground="#FCA5A5" BorderBrush="#7F1D1D" BorderThickness="1" Margin="0,0,8,0"/>
+                        </WrapPanel>
+
+                        <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                            <CheckBox x:Name="ChkRawJsonMode" Content="Raw JSON" Foreground="#A1A1AA" VerticalAlignment="Center"
+                                      Margin="0,0,12,0" Checked="ChkRawJsonMode_Changed" Unchecked="ChkRawJsonMode_Changed"/>
+                            <Button Content="Save Lineup" Click="BtnSaveChannels_Click"
+                                    Padding="16,6" Background="#16A34A" Foreground="White" FontWeight="Bold" BorderThickness="0"/>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Second Row: Search Filter, Bulk Hide/Show & Channel Counter -->
+                    <Border Grid.Row="1" Background="#27272A" CornerRadius="6" Padding="10,7" Margin="0,0,0,10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="220"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Column="0" Text="Filter:" Foreground="#A1A1AA" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <TextBox x:Name="TxtChannelFilter" Grid.Column="1" Height="26" VerticalContentAlignment="Center"
+                                     Background="#09090B" Foreground="#F4F4F5" BorderBrush="#3F3F46" BorderThickness="1" Padding="6,0"
+                                     TextChanged="TxtChannelFilter_TextChanged"
+                                     ToolTip="Search by Channel Name, Ch #, ID, or Gracenote Station ID"/>
+
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" Margin="14,0,0,0">
+                                <Button Content="Hide Selected" Click="BtnHideSelected_Click"
+                                        Padding="10,4" Background="#3F3F46" Foreground="#F4F4F5" BorderThickness="0" Margin="0,0,6,0"
+                                        ToolTip="Hides all highlighted rows from the M3U playlist"/>
+                                <Button Content="Show Selected" Click="BtnShowSelected_Click"
+                                        Padding="10,4" Background="#3F3F46" Foreground="#F4F4F5" BorderThickness="0" Margin="0,0,6,0"
+                                        ToolTip="Enables all highlighted rows in the M3U playlist"/>
+                                <Button Content="Show All" Click="BtnShowAll_Click"
+                                        Padding="10,4" Background="#3F3F46" Foreground="#38BDF8" BorderThickness="0"/>
+                            </StackPanel>
+
+                            <TextBlock x:Name="TxtLineupStats" Grid.Column="3" Text="0 active in M3U (0 hidden)"
+                                       HorizontalAlignment="Right" VerticalAlignment="Center"
+                                       Foreground="#A1A1AA" FontWeight="SemiBold" FontSize="12"/>
+                        </Grid>
+                    </Border>
+
+                    <!-- Modern Dark-Mode DataGrid View -->
+                    <DataGrid x:Name="GridChannels" Grid.Row="2" AutoGenerateColumns="False"
+                              CanUserAddRows="False" CanUserDeleteRows="True"
+                              Background="#09090B" Foreground="#F4F4F5"
+                              RowBackground="#121215" AlternatingRowBackground="#18181C"
+                              BorderBrush="#27272A" BorderThickness="1"
+                              GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#27272A"
+                              HeadersVisibility="Column" RowHeight="34" FontSize="13"
+                              SelectionMode="Extended" SelectionUnit="FullRow">
+
+                        <DataGrid.Resources>
+                            <Style TargetType="DataGridColumnHeader">
+                                <Setter Property="Background" Value="#27272A"/>
+                                <Setter Property="Foreground" Value="#38BDF8"/>
+                                <Setter Property="FontWeight" Value="SemiBold"/>
+                                <Setter Property="FontSize" Value="12"/>
+                                <Setter Property="Padding" Value="10,8"/>
+                                <Setter Property="BorderBrush" Value="#3F3F46"/>
+                                <Setter Property="BorderThickness" Value="0,0,1,1"/>
+                            </Style>
+
+                            <Style TargetType="DataGridRow">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsHidden}" Value="True">
+                                        <Setter Property="Opacity" Value="0.42"/>
+                                    </DataTrigger>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Background" Value="#1E293B"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+
+                            <Style TargetType="DataGridCell">
+                                <Setter Property="Padding" Value="8,0"/>
+                                <Setter Property="BorderThickness" Value="0"/>
+                                <Setter Property="Template">
+                                    <Setter.Value>
+                                        <ControlTemplate TargetType="DataGridCell">
+                                            <Border Padding="{TemplateBinding Padding}" Background="{TemplateBinding Background}">
+                                                <ContentPresenter VerticalAlignment="Center"/>
+                                            </Border>
+                                        </ControlTemplate>
+                                    </Setter.Value>
+                                </Setter>
+                                <Style.Triggers>
+                                    <Trigger Property="IsSelected" Value="True">
+                                        <Setter Property="Background" Value="#0369A1"/>
+                                        <Setter Property="Foreground" Value="White"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </DataGrid.Resources>
+
                         <DataGrid.Columns>
-                            <DataGridTextColumn Header="ID (Slug)" Binding="{Binding Id, UpdateSourceTrigger=PropertyChanged}" Width="110"/>
-                            <DataGridTextColumn Header="Channel Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="150"/>
-                            <DataGridTextColumn Header="Ch #" Binding="{Binding ChannelNumber, UpdateSourceTrigger=PropertyChanged}" Width="75"/>
-                            <DataGridTextColumn Header="Station ID (Gracenote)" Binding="{Binding StationId, UpdateSourceTrigger=PropertyChanged}" Width="140"/>
-                            <DataGridTextColumn Header="Watch URL" Binding="{Binding Url, UpdateSourceTrigger=PropertyChanged}" Width="*"/>
+                            <!-- M3U Active/Hidden Toggle Column -->
+                            <DataGridTemplateColumn Header="Hide" Width="58">
+                                <DataGridTemplateColumn.CellTemplate>
+                                    <DataTemplate>
+                                        <CheckBox IsChecked="{Binding IsHidden, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                                  Click="ChkRowHidden_Click"
+                                                  ToolTip="Check to hide this channel from playlist.m3u"/>
+                                    </DataTemplate>
+                                </DataGridTemplateColumn.CellTemplate>
+                            </DataGridTemplateColumn>
+
+                            <DataGridTextColumn Header="Ch #" Binding="{Binding ChannelNumber, UpdateSourceTrigger=PropertyChanged}" Width="68" FontFamily="Consolas" Foreground="#38BDF8"/>
+                            <DataGridTextColumn Header="Channel Name" Binding="{Binding Name, UpdateSourceTrigger=PropertyChanged}" Width="190" FontWeight="SemiBold"/>
+                            <DataGridTextColumn Header="Gracenote ID" Binding="{Binding StationId, UpdateSourceTrigger=PropertyChanged}" Width="115" FontFamily="Consolas" Foreground="#4ADE80"/>
+                            <DataGridTextColumn Header="ID (Slug)" Binding="{Binding Id, UpdateSourceTrigger=PropertyChanged}" Width="145" FontFamily="Consolas" Foreground="#A1A1AA"/>
+                            <DataGridTextColumn Header="Watch URL" Binding="{Binding Url, UpdateSourceTrigger=PropertyChanged}" Width="*" FontFamily="Consolas" Foreground="#A1A1AA"/>
                         </DataGrid.Columns>
                     </DataGrid>
 
                     <!-- Raw JSON Text Editor View -->
-                    <TextBox x:Name="TxtRawChannelsJson" Grid.Row="1" Visibility="Collapsed"
+                    <TextBox x:Name="TxtRawChannelsJson" Grid.Row="2" Visibility="Collapsed"
                              Background="#09090B" Foreground="#38BDF8" BorderBrush="#3F3F46" BorderThickness="1" Padding="10"
                              FontFamily="Consolas" FontSize="13" AcceptsReturn="True" AcceptsTab="True"
                              VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>

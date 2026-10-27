@@ -614,6 +614,195 @@ public class ChannelSyncService
         })()
         """;
 		
+    // Direct, verified Gracenote TMS StationId table (East/Central/Mountain ID, Pacific ID)
+    // Bypasses fuzzy text search completely for core national networks!
+    private static readonly Dictionary<string, (string EastId, string WestId)> VerifiedGracenoteStationIds =
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        // Kids & Family
+        { "Disney Channel",             ("59684",  "59685") },
+        { "Disney Junior",              ("74885",  "75004") },
+        { "Disney XD",                  ("60006",  "60007") },
+        { "Nickelodeon",                ("59432",  "59433") },
+        { "Nick Jr.",                   ("82649",  "82650") },
+        { "Nicktoons",                  ("89572",  "89572") },
+        { "TeenNick",                   ("59036",  "59036") },
+        { "Cartoon Network",            ("60048",  "60049") },
+        { "Discovery Family",           ("67749",  "67749") },
+        { "Discovery Family Channel",   ("67749",  "67749") },
+        { "Universal Kids",             ("70225",  "70225") },
+        { "PBS Kids",                   ("101364", "101364") },
+        { "Public Broadcasting System Kids", ("101364", "101364") },
+
+        // General Entertainment
+        { "E!",                         ("61812",  "94563") },
+        { "E! Entertainment Television",("61812",  "94563") },
+        { "Freeform",                   ("59615",  "59616") },
+        { "USA",                        ("58452",  "74030") },
+        { "USA Network",                ("58452",  "74030") },
+        { "TNT",                        ("42642",  "61340") },
+        { "Turner Network Television",  ("42642",  "61340") },
+        { "TBS",                        ("58515",  "67890") },
+        { "Turner Broadcasting System", ("58515",  "67890") },
+        { "truTV",                      ("64490",  "65717") },
+        { "FX",                         ("58574",  "58575") },
+        { "FXX",                        ("66379",  "82571") },
+        { "FXM",                        ("70253",  "70253") },
+        { "FXM (FX Movie Channel)",     ("70253",  "70253") },
+        { "Bravo",                      ("58625",  "73994") },
+        { "SYFY",                       ("58623",  "65626") },
+        { "Oxygen",                     ("70522",  "70522") },
+        { "Oxygen True Crime",          ("70522",  "70522") },
+        { "AMC",                        ("59337",  "92041") },
+        { "American Movie Classics",    ("59337",  "92041") },
+        { "BBC America",                ("64492",  "64492") },
+        { "IFC",                        ("59444",  "59444") },
+        { "Independent Film Channel",   ("59444",  "59444") },
+        { "SundanceTV",                 ("71280",  "71280") },
+        { "WE tv",                      ("59296",  "59296") },
+        { "A&E",                        ("51529",  "73992") },
+        { "Arts and Entertainment",     ("51529",  "73992") },
+        { "History",                    ("57708",  "73993") },
+        { "Lifetime",                   ("60150",  "73997") },
+        { "Lifetime Networks",          ("60150",  "73997") },
+        { "LMN",                        ("55887",  "55887") },
+        { "Lifetime Movies",            ("55887",  "55887") },
+        { "FYI",                        ("58988",  "58988") },
+        { "fyi,",                       ("58988",  "58988") },
+        { "VICE",                       ("18822",  "18822") },
+        { "Comedy Central",             ("62420",  "62421") },
+        { "Paramount",                  ("59186",  "59187") },
+        { "Paramount Network",          ("59186",  "59187") },
+        { "TV Land",                    ("73541",  "73541") },
+        { "MTV",                        ("60964",  "60965") },
+        { "Music Television",           ("60964",  "60965") },
+        { "MTV2",                       ("75077",  "75077") },
+        { "Music Television 2",         ("75077",  "75077") },
+        { "MTV Classic",                ("88870",  "88870") },
+        { "Music Television Classic",   ("88870",  "88870") },
+        { "VH1",                        ("60046",  "60047") },
+        { "VH-1: Video Hits One",       ("60046",  "60047") },
+        { "BET",                        ("63236",  "63237") },
+        { "Black Entertainment Television", ("63236", "63237") },
+        { "BET Her",                    ("63220",  "63220") },
+        { "CMT",                        ("59440",  "59440") },
+        { "Logo",                       ("46762",  "46762") },
+        { "Pop",                        ("68796",  "68796") },
+        { "Hallmark Channel",           ("66268",  "66268") },
+        { "Hallmark Mystery",           ("61522",  "61522") },
+        { "Hallmark Family",            ("105723", "105723") },
+        { "GFAM",                       ("82892",  "82892") },
+        { "Great American Family",      ("82892",  "82892") },
+        { "Game Show Network",          ("68827",  "68827") },
+        { "Turner Classic Movies",      ("64312",  "64312") },
+        { "TCM",                        ("64312",  "64312") },
+        { "TV One",                     ("61960",  "61960") },
+        { "Cleo TV",                    ("110288", "110288") },
+        { "Bounce",                     ("73067",  "73067") },
+        { "Comet TV",                   ("97051",  "97051") },
+        { "Comet",                      ("97051",  "97051") },
+        { "CHARGE!",                    ("102148", "102148") },
+        { "Cozi",                       ("89994",  "89994") },
+        { "Start TV",                   ("109454", "109454") },
+        { "Start TV Network",           ("109454", "109454") },
+        { "Dabl",                       ("112157", "112157") },
+        { "ION",                        ("62746",  "62746") },
+        { "ION Media Networks",         ("62746",  "62746") },
+        { "Reelz",                      ("119136", "119136") },
+        { "UP (Uplifting Entertainment)",("66143", "66143") },
+
+        // Discovery / Nat Geo / Lifestyle
+        { "Discovery Channel",          ("56905",  "56906") },
+        { "Discovery",                  ("56905",  "56906") },
+        { "Food Network",               ("50747",  "50748") },
+        { "HGTV",                       ("49788",  "49789") },
+        { "Home & Garden Television",   ("49788",  "49789") },
+        { "TLC",                        ("57391",  "57392") },
+        { "The Learning Channel",       ("57391",  "57392") },
+        { "ID",                         ("65342",  "65342") },
+        { "Investigation Discovery",    ("65342",  "65342") },
+        { "Animal Planet",              ("57394",  "57395") },
+        { "Travel Channel",             ("59303",  "59303") },
+        { "Science",                    ("57390",  "57390") },
+        { "Science Channel",            ("57390",  "57390") },
+        { "The Science Channel",        ("57390",  "57390") },
+        { "Discovery Turbo",            ("31046",  "31046") },
+        { "MotorTrend",                 ("31046",  "31046") },
+        { "OWN",                        ("70388",  "70389") },
+        { "Oprah Winfrey Network",      ("70388",  "70389") },
+        { "Magnolia Network",           ("67454",  "67454") },
+        { "Cooking Channel",            ("68065",  "68065") },
+        { "Destination America",        ("60468",  "60468") },
+        { "American Heroes Channel",    ("78808",  "78808") },
+        { "American Heroes",            ("78808",  "78808") },
+        { "Discovery Life",             ("92204",  "92204") },
+        { "Nat Geo",                    ("49438",  "71601") },
+        { "National Geographic",        ("49438",  "71601") },
+        { "National Geographic Channel",("49438",  "71601") },
+        { "Nat Geo Wild",               ("67375",  "67375") },
+        { "National Geographic Wild",   ("67375",  "67375") },
+        { "Smithsonian Channel",        ("65799",  "65799") },
+
+        // News & Business
+        { "CNN",                        ("58646",  "58646") },
+        { "Cable News Network",         ("58646",  "58646") },
+        { "HLN",                        ("64549",  "64549") },
+        { "Headline News",              ("64549",  "64549") },
+        { "FOX News",                   ("60179",  "60179") },
+        { "Fox News Channel",           ("60179",  "60179") },
+        { "FOX Business",               ("58718",  "58718") },
+        { "Fox Business Network",       ("58718",  "58718") },
+        { "MSNBC",                      ("64241",  "64241") },
+        { "MS NOW",                     ("64241",  "64241") },
+        { "CNBC",                       ("58780",  "58780") },
+        { "NewsNation",                 ("91096",  "91096") },
+        { "NEWSMAX",                    ("97163",  "97163") },
+        { "Newsmax TV",                 ("97163",  "97163") },
+        { "BBC News",                   ("107709", "107709") },
+        { "The Weather Channel",        ("58812",  "58812") },
+        { "FOX Weather",                ("93141",  "93141") },
+        { "C-SPAN",                     ("68344",  "68344") },
+        { "C-SPAN2",                    ("68334",  "68334") },
+        { "C-SPAN3",                    ("68332",  "68332") },
+
+        // Sports
+        { "ESPN",                       ("32645",  "32645") },
+        { "Entertainment Sports Programming Network", ("32645", "32645") },
+        { "ESPN2",                      ("45507",  "45507") },
+        { "ESPNews",                    ("59976",  "59976") },
+        { "ESPNU",                      ("60696",  "60696") },
+        { "SEC Network",                ("89714",  "89714") },
+        { "ACC Network",                ("111871", "111871") },
+        { "FS1",                        ("82547",  "82547") },
+        { "FOX Sports 1",               ("82547",  "82547") },
+        { "FS2",                        ("59305",  "59305") },
+        { "FOX Sports 2",               ("59305",  "59305") },
+        { "BTN",                        ("58321",  "58321") },
+        { "Big Ten Network",            ("58321",  "58321") },
+        { "CBS Sports Network",         ("59250",  "59250") },
+        { "NFL Network",                ("45399",  "45399") },
+        { "National Football League Network", ("45399", "45399") },
+        { "NBA TV",                     ("45526",  "45526") },
+        { "National Basketball Association TV", ("45526", "45526") },
+        { "MLB Network",                ("62081",  "62081") },
+        { "Major League Baseball Network", ("62081", "62081") },
+        { "NHL Network",                ("58690",  "58690") },
+        { "National Hockey League Network", ("58690", "58690") },
+        { "Golf Channel",               ("61854",  "61854") },
+        { "Tennis Channel",             ("60316",  "60316") },
+
+        // Entertainment Studios & Shopping
+        { "Comedy.TV",                  ("82470",  "82470") },
+        { "JusticeCentral.TV",          ("78850",  "78850") },
+        { "Recipe.TV",                  ("71769",  "71769") },
+        { "Cars.TV",                    ("69062",  "69062") },
+        { "theGRIO",                    ("121310", "121310") },
+        { "QVC",                        ("60222",  "60222") },
+		{ "AWE",                        ("59436",  "59436") },
+        { "HBCU GO",                    ("125163", "125163") },
+        { "HSN",                        ("62077",  "62077") }
+    };
+
     private static async Task<int> MatchGracenoteStationsAsync(
         List<ProviderChannel> channels,
         string dvrIp,
@@ -623,6 +812,10 @@ public class ChannelSyncService
     {
         string serverUrl = $"http://{dvrIp}:{dvrPort}";
         int updatedCount = 0;
+
+        // Pacific (UTC-8), Alaska (UTC-9), Hawaii (UTC-10) use West/Pacific feeds;
+        // Eastern (UTC-5), Central (UTC-6), and Mountain (UTC-7) use East feeds on YTTV.
+        bool preferPacific = TimeZoneInfo.Local.BaseUtcOffset.TotalHours <= -8.0;
 
         for (int i = 0; i < channels.Count; i++)
         {
@@ -636,77 +829,230 @@ public class ChannelSyncService
             }
 
             string rawName = ch.Name.Trim();
-            List<TmsStation>? results = null;
+            TmsStation? match = null;
 
-            // 1. For Xfinity, the URL callSign (e.g., HBOSG, SHO2e, ESPNU) is infinitely more accurate than the generic display name.
+            // 1. Check Verified National Network Gracenote StationId table first!
+            if (VerifiedGracenoteStationIds.TryGetValue(rawName, out var verifiedIds))
+            {
+                ch.StationId = preferPacific ? verifiedIds.WestId : verifiedIds.EastId;
+                updatedCount++;
+                log($"[Gracenote] [OK] {ch.Name} -> Verified US HD [StationId: {ch.StationId}]");
+                continue;
+            }
+
+            // 2. Skip vague local affiliate names that lack real FCC call letters (e.g. "FOX 46", "CW Charlotte", "TV64", "PBS NC", "SCETV")
             var xfMatch = System.Text.RegularExpressions.Regex.Match(ch.Url ?? "", @"/stream/live/([^/]+)/\d+/");
             string? urlCallSign = xfMatch.Success ? Uri.UnescapeDataString(xfMatch.Groups[1].Value) : null;
 
+            if (string.IsNullOrWhiteSpace(urlCallSign) && IsVagueLocalStationName(rawName))
+            {
+                log($"[Gracenote] [--] {ch.Name}: Local station without FCC call letters (leaving blank for manual mapping in Channels DVR)");
+                continue;
+            }
+
+            // 3. For Xfinity, query by the URL callSign first
             if (!string.IsNullOrWhiteSpace(urlCallSign))
             {
-                results = await QueryChannelsDvrTmsAsync(serverUrl, urlCallSign);
+                var results = await QueryChannelsDvrTmsAsync(serverUrl, urlCallSign);
+                match = SelectBestTmsStation(results, urlCallSign, rawName, preferPacific);
 
-                if (results is null || results.Count == 0)
+                if (match is null)
                 {
-                    // Strip trailing HD/D (e.g. "CNNHD" -> "CNN", "HGTVD" -> "HGTV")
-                    string cleanCs = System.Text.RegularExpressions.Regex.Replace(urlCallSign, @"(?:HD|DT\d*|D)$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    string cleanCs = System.Text.RegularExpressions.Regex.Replace(
+                        urlCallSign, @"(?:HD|DT\d*|D)$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                     if (cleanCs.Length >= 3 && !string.Equals(cleanCs, urlCallSign, StringComparison.OrdinalIgnoreCase))
                     {
                         results = await QueryChannelsDvrTmsAsync(serverUrl, cleanCs);
+                        match = SelectBestTmsStation(results, cleanCs, rawName, preferPacific);
                     }
                 }
             }
 
-            // 2. Fallback to the display name if callSign lookups failed (or if it is YouTube TV / Spectrum)
-            if (results is null || results.Count == 0)
+            // 4. If the channel starts with a real W/K broadcast call sign (e.g. "WBTV", "WSOC 9", "WCNC NBC"), query that exact call sign
+            if (match is null && HasRealBroadcastCallSign(rawName, out string fccCallSign))
             {
-                results = await QueryChannelsDvrTmsAsync(serverUrl, rawName);
-
-                if (results is null || results.Count == 0)
-                {
-                    string stripped = System.Text.RegularExpressions.Regex.Replace(rawName, @"\s+\d+$", "");
-                    if (!string.Equals(stripped, rawName, StringComparison.OrdinalIgnoreCase))
-                    {
-                        results = await QueryChannelsDvrTmsAsync(serverUrl, stripped);
-                    }
-                }
-
-                if ((results is null || results.Count == 0) && rawName.Contains(' '))
-                {
-                    string firstWord = rawName.Split(' ')[0];
-                    if (firstWord.Length >= 3)
-                    {
-                        results = await QueryChannelsDvrTmsAsync(serverUrl, firstWord);
-                    }
-                }
+                var results = await QueryChannelsDvrTmsAsync(serverUrl, fccCallSign);
+                match = SelectBestTmsStation(results, fccCallSign, fccCallSign, preferPacific);
             }
 
-            if (results is { Count: > 0 })
+            // 5. Fallback: Search by raw display name for remaining national/FAST networks
+            if (match is null)
             {
-                var match = results.FirstOrDefault(r =>
-                    (!string.IsNullOrWhiteSpace(r.CallSign) &&
-                     (string.Equals(System.Text.RegularExpressions.Regex.Replace(r.CallSign, @"DT\d*$", ""), rawName, StringComparison.OrdinalIgnoreCase) ||
-                      r.CallSign.StartsWith(rawName, StringComparison.OrdinalIgnoreCase) ||
-                      (!string.IsNullOrWhiteSpace(urlCallSign) && r.CallSign.StartsWith(urlCallSign, StringComparison.OrdinalIgnoreCase)))) ||
-                    (!string.IsNullOrWhiteSpace(r.Name) && r.Name.Contains(rawName, StringComparison.OrdinalIgnoreCase)))
-                    ?? results[0];
+                var results = await QueryChannelsDvrTmsAsync(serverUrl, rawName);
+                match = SelectBestTmsStation(results, null, rawName, preferPacific);
+            }
 
-                if (!string.IsNullOrWhiteSpace(match.StationId))
-                {
-                    ch.StationId = match.StationId;
-                    updatedCount++;
-                    log($"[Gracenote] [OK] {ch.Name} -> {match.Name} ({match.CallSign}) [StationId: {match.StationId}]");
-                }
+            if (match is not null && !string.IsNullOrWhiteSpace(match.StationId))
+            {
+                ch.StationId = match.StationId;
+                updatedCount++;
+                log($"[Gracenote] [OK] {ch.Name} -> {match.Name} ({match.CallSign}) [StationId: {match.StationId}]");
             }
             else
             {
-                log($"[Gracenote] [??] {ch.Name}: No match found (leaving blank for Channels DVR auto-map)");
+                log($"[Gracenote] [??] {ch.Name}: No valid US match found (leaving blank for manual map)");
             }
 
             await Task.Delay(40);
         }
 
         return updatedCount;
+    }
+
+    private static bool HasRealBroadcastCallSign(string rawName, out string extractedCallSign)
+    {
+        extractedCallSign = "";
+        string firstToken = rawName.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "";
+
+        if (System.Text.RegularExpressions.Regex.IsMatch(firstToken, @"^[WK][A-Z]{2,3}$", System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            string upper = firstToken.ToUpperInvariant();
+            if (upper is not ("WEST" or "KIDS" or "WILD" or "WE" or "WETV"))
+            {
+                extractedCallSign = upper;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsVagueLocalStationName(string rawName)
+    {
+        if (System.Text.RegularExpressions.Regex.IsMatch(
+            rawName,
+            @"^(?:FOX|CBS|NBC|ABC|CW|MY|TV|CH|CHANNEL)\s*\d+$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            return true;
+        }
+
+        if (System.Text.RegularExpressions.Regex.IsMatch(
+            rawName,
+            @"^(?:CW|PBS|Telemundo|Univision|UniMas|MyNetworkTV)\s+[A-Za-z]+",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+        {
+            return true;
+        }
+
+        if (rawName.Equals("SCETV", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return false;
+    }
+
+    private static TmsStation? SelectBestTmsStation(
+        List<TmsStation>? candidates,
+        string? targetCallSign,
+        string rawName,
+        bool preferPacific)
+    {
+        if (candidates is null || candidates.Count == 0)
+            return null;
+
+        bool isSpanishChannel = rawName.Contains("Univision", StringComparison.OrdinalIgnoreCase) ||
+                                rawName.Contains("Telemundo", StringComparison.OrdinalIgnoreCase) ||
+                                rawName.Contains("UniMas", StringComparison.OrdinalIgnoreCase) ||
+                                rawName.Contains("Galavision", StringComparison.OrdinalIgnoreCase) ||
+                                rawName.Contains("Galavisión", StringComparison.OrdinalIgnoreCase) ||
+                                rawName.Contains("TUDN", StringComparison.OrdinalIgnoreCase) ||
+                                rawName.Contains("Deportes", StringComparison.OrdinalIgnoreCase) ||
+                                rawName.Contains("Universo", StringComparison.OrdinalIgnoreCase);
+
+        TmsStation? best = null;
+        int bestScore = int.MinValue;
+
+        foreach (var c in candidates)
+        {
+            if (string.IsNullOrWhiteSpace(c.StationId))
+                continue;
+
+            string name = c.Name?.Trim() ?? "";
+            string call = c.CallSign?.Trim() ?? "";
+            var langs = c.BcastLangs ?? [];
+
+            // 1. Hard Reject: Inactive stations
+            if (name.Contains("(inactive)", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            // 2. Hard Reject: Known international & FAST clone callSigns that pollute US searches
+            if (call.EndsWith("UK", StringComparison.OrdinalIgnoreCase) ||
+                call.EndsWith("KR", StringComparison.OrdinalIgnoreCase) ||
+                call.EndsWith("IND", StringComparison.OrdinalIgnoreCase) ||
+                call.EndsWith("LAT", StringComparison.OrdinalIgnoreCase) ||
+                call.EndsWith("MUE", StringComparison.OrdinalIgnoreCase) ||
+                call.EndsWith("DAE", StringComparison.OrdinalIgnoreCase) ||
+                call.StartsWith("VIZ", StringComparison.OrdinalIgnoreCase) ||
+                call.StartsWith("PTV", StringComparison.OrdinalIgnoreCase) ||
+                call.StartsWith("XSM", StringComparison.OrdinalIgnoreCase) ||
+                call.Contains("FIFA", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            // 3. Hard Reject: Non-English feeds (unless the channel itself is a Spanish network)
+            if (!isSpanishChannel && langs.Count > 0)
+            {
+                bool hasUsEnglish = langs.Any(l =>
+                    l.Equals("en", StringComparison.OrdinalIgnoreCase) ||
+                    l.Equals("en-US", StringComparison.OrdinalIgnoreCase));
+
+                if (!hasUsEnglish)
+                    continue;
+            }
+
+            int score = 0;
+
+            // 4. CallSign match scoring
+            if (!string.IsNullOrWhiteSpace(targetCallSign))
+            {
+                if (string.Equals(call, targetCallSign, StringComparison.OrdinalIgnoreCase))
+                    score += 200;
+                else if (call.StartsWith(targetCallSign, StringComparison.OrdinalIgnoreCase))
+                    score += 120;
+                else if (string.Equals(System.Text.RegularExpressions.Regex.Replace(call, @"DT\d*$", ""), targetCallSign, StringComparison.OrdinalIgnoreCase))
+                    score += 150;
+            }
+
+            // 5. Name match scoring
+            string cleanCandidateName = System.Text.RegularExpressions.Regex.Replace(name, @"\s+HD$", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (string.Equals(cleanCandidateName, rawName, StringComparison.OrdinalIgnoreCase))
+                score += 100;
+            else if (name.Contains(rawName, StringComparison.OrdinalIgnoreCase))
+                score += 40;
+
+            // 6. HDTV preference over SDTV
+            if (string.Equals(c.VideoQuality?.VideoType, "HDTV", StringComparison.OrdinalIgnoreCase) ||
+                call.EndsWith("HD", StringComparison.OrdinalIgnoreCase) ||
+                call.EndsWith("HDP", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 80;
+            }
+
+            // 7. East vs. Pacific Timezone Feed Alignment
+            bool isWestFeed = call.EndsWith("P", StringComparison.OrdinalIgnoreCase) ||
+                              call.EndsWith("HDP", StringComparison.OrdinalIgnoreCase) ||
+                              call.EndsWith("HDW", StringComparison.OrdinalIgnoreCase) ||
+                              name.Contains("Pacific", StringComparison.OrdinalIgnoreCase) ||
+                              name.Contains("West", StringComparison.OrdinalIgnoreCase);
+
+            if (preferPacific)
+            {
+                score += isWestFeed ? 50 : -20;
+            }
+            else
+            {
+                score += isWestFeed ? -60 : 40;
+            }
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = c;
+            }
+        }
+
+        return best;
     }
 
     private static async Task<List<TmsStation>?> QueryChannelsDvrTmsAsync(string serverUrl, string searchTerm)
@@ -822,11 +1168,20 @@ public class ChannelSyncService
         await ws.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None);
     }
 
-    private sealed class TmsStation
+   private sealed class TmsStation
     {
         public string? StationId { get; set; }
         public string? Name { get; set; }
         public string? CallSign { get; set; }
         public string? Type { get; set; }
+        public List<string>? BcastLangs { get; set; }
+        public TmsVideoQuality? VideoQuality { get; set; }
+    }
+
+    private sealed class TmsVideoQuality
+    {
+        public string? SignalType { get; set; }
+        public string? VideoType { get; set; }
+        public string? TruResolution { get; set; }
     }
 }

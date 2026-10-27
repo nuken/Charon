@@ -22,6 +22,7 @@ public class ProviderChannel
     public string ChannelNumber { get; set; } = string.Empty;
     public string StationId { get; set; } = string.Empty;
     public string Url { get; set; } = string.Empty;
+	public bool IsHidden { get; set; } = false;
 }
 
 public class LoadedProvider
@@ -658,6 +659,9 @@ public class ProviderManager
 
             foreach (var ch in provider.Channels)
             {
+                if (ch.IsHidden)
+                    continue;
+
                 string uniqueChannelId = $"{provider.Manifest.Id}-{ch.Id}";
                 var extInf = new StringBuilder($"#EXTINF:-1 channel-id=\"{uniqueChannelId}\"");
 

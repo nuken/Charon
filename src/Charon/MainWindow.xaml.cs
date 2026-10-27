@@ -1,9 +1,11 @@
 ﻿using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 using System.Windows.Interop;
 using Charon.Config;
 using Charon.Providers;
@@ -116,7 +118,7 @@ public partial class MainWindow : Window
         _providers.ReloadProviders();
 
         CmbProviders.ItemsSource = _providers.Providers
-            .Select(p => $"{p.Manifest.Name} ({p.Channels.Count} ch)")
+            .Select(p => $"{p.Manifest.Name} ({p.Channels.Count(c => !c.IsHidden)}/{p.Channels.Count} ch)")
             .ToList();
 
         if (CmbProviders.Items.Count > 0)
@@ -142,6 +144,7 @@ public partial class MainWindow : Window
         if (provider is null)
         {
             TxtRawChannelsJson.Text = "[]";
+            UpdateLineupStats();
             return;
         }
 
@@ -153,10 +156,12 @@ public partial class MainWindow : Window
                 Name = ch.Name,
                 ChannelNumber = ch.ChannelNumber,
                 StationId = ch.StationId,
-                Url = ch.Url
+                Url = ch.Url,
+                IsHidden = ch.IsHidden
             });
         }
 
+        UpdateLineupStats();
         TxtRawChannelsJson.Text = ProviderManager.FormatChannelsJson(_editableChannels);
     }
 
@@ -182,6 +187,7 @@ public partial class MainWindow : Window
                 foreach (var ch in parsed)
                     _editableChannels.Add(ch);
 
+                UpdateLineupStats();
                 TxtRawChannelsJson.Visibility = Visibility.Collapsed;
                 GridChannels.Visibility = Visibility.Visible;
             }
@@ -204,19 +210,21 @@ public partial class MainWindow : Window
             Name = "New Channel",
             ChannelNumber = "",
             StationId = "",
-            Url = "https://tv.youtube.com/watch/"
+            Url = "https://tv.youtube.com/watch/",
+            IsHidden = false
         };
 
         _editableChannels.Add(newChannel);
         GridChannels.SelectedItem = newChannel;
         GridChannels.ScrollIntoView(newChannel);
+        UpdateLineupStats();
     }
 
     private void BtnDeleteChannelRow_Click(object sender, RoutedEventArgs e)
     {
         if (ChkRawJsonMode.IsChecked == true)
         {
-            MessageBox.Show("Uncheck 'Raw JSON View' to delete selected rows, or edit the JSON text directly.", "Channel Editor", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Uncheck 'Raw JSON' to delete selected rows, or edit the JSON text directly.", "Channel Editor", MessageBoxButton.OK, MessageBoxImage.Information);
             return;
         }
 
@@ -230,7 +238,83 @@ public partial class MainWindow : Window
         foreach (var item in selected)
             _editableChannels.Remove(item);
 
+        UpdateLineupStats();
         TxtRawChannelsJson.Text = ProviderManager.FormatChannelsJson(_editableChannels);
+    }
+
+    private void TxtChannelFilter_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isInitializing) return;
+
+        string filter = TxtChannelFilter.Text.Trim();
+        ICollectionView? view = CollectionViewSource.GetDefaultView(GridChannels.ItemsSource);
+        if (view is null) return;
+
+        if (string.IsNullOrWhiteSpace(filter))
+        {
+            view.Filter = null;
+        }
+        else
+        {
+            view.Filter = obj =>
+            {
+                if (obj is not ProviderChannel ch) return false;
+                return (ch.Name?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                       (ch.ChannelNumber?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                       (ch.Id?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                       (ch.StationId?.Contains(filter, StringComparison.OrdinalIgnoreCase) ?? false);
+            };
+        }
+    }
+
+    private void ChkRowHidden_Click(object sender, RoutedEventArgs e)
+    {
+        GridChannels.CommitEdit(DataGridEditingUnit.Cell, true);
+        GridChannels.CommitEdit(DataGridEditingUnit.Row, true);
+        CollectionViewSource.GetDefaultView(GridChannels.ItemsSource)?.Refresh();
+        UpdateLineupStats();
+    }
+
+    private void BtnHideSelected_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = GridChannels.SelectedItems.OfType<ProviderChannel>().ToList();
+        if (selected.Count == 0) return;
+
+        foreach (var ch in selected)
+            ch.IsHidden = true;
+
+        CollectionViewSource.GetDefaultView(GridChannels.ItemsSource)?.Refresh();
+        UpdateLineupStats();
+    }
+
+    private void BtnShowSelected_Click(object sender, RoutedEventArgs e)
+    {
+        var selected = GridChannels.SelectedItems.OfType<ProviderChannel>().ToList();
+        if (selected.Count == 0) return;
+
+        foreach (var ch in selected)
+            ch.IsHidden = false;
+
+        CollectionViewSource.GetDefaultView(GridChannels.ItemsSource)?.Refresh();
+        UpdateLineupStats();
+    }
+
+    private void BtnShowAll_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (var ch in _editableChannels)
+            ch.IsHidden = false;
+
+        CollectionViewSource.GetDefaultView(GridChannels.ItemsSource)?.Refresh();
+        UpdateLineupStats();
+    }
+
+    private void UpdateLineupStats()
+    {
+        if (TxtLineupStats is null) return;
+        int total = _editableChannels.Count;
+        int hidden = _editableChannels.Count(c => c.IsHidden);
+        int active = total - hidden;
+        TxtLineupStats.Text = $"{active} active in M3U ({hidden} hidden)";
     }
 
     private void BtnImportChannels_Click(object sender, RoutedEventArgs e)
@@ -288,6 +372,7 @@ public partial class MainWindow : Window
                         existing.ChannelNumber = incoming.ChannelNumber;
                         existing.StationId = incoming.StationId;
                         existing.Url = incoming.Url;
+                        existing.IsHidden = incoming.IsHidden;
                     }
                     else
                     {
@@ -374,7 +459,8 @@ public partial class MainWindow : Window
                         Name = string.IsNullOrWhiteSpace(c.Name) ? c.Id.Trim() : c.Name.Trim(),
                         ChannelNumber = c.ChannelNumber?.Trim() ?? string.Empty,
                         StationId = c.StationId?.Trim() ?? string.Empty,
-                        Url = c.Url?.Trim() ?? string.Empty
+                        Url = c.Url?.Trim() ?? string.Empty,
+                        IsHidden = c.IsHidden
                     })
                     .ToList();
             }
@@ -383,8 +469,11 @@ public partial class MainWindow : Window
             TxtRawChannelsJson.Text = ProviderManager.FormatChannelsJson(channelsToSave);
             RefreshProviderDropdown();
 
-            AppendLog($"[Editor] Saved {channelsToSave.Count} channel(s) to {savedPath}");
-            MessageBox.Show($"Saved {channelsToSave.Count} channel(s) to:\n{savedPath}\n\nYour Channels DVR M3U playlist is updated immediately!",
+            int activeCount = channelsToSave.Count(c => !c.IsHidden);
+            int hiddenCount = channelsToSave.Count - activeCount;
+
+            AppendLog($"[Editor] Saved {channelsToSave.Count} channel(s) ({activeCount} active in M3U, {hiddenCount} hidden) to {savedPath}");
+            MessageBox.Show($"Saved {channelsToSave.Count} channel(s) ({activeCount} active in M3U, {hiddenCount} hidden) to:\n{savedPath}\n\nYour Channels DVR M3U playlist is updated immediately!",
                 "Channels Saved", MessageBoxButton.OK, MessageBoxImage.Information);
         }
         catch (Exception ex)
@@ -415,8 +504,8 @@ public partial class MainWindow : Window
         AppendLog("[Auth] Sign in to your account, verify video plays, and then close that Chrome window to sync your session across all 4 tuners.");
         _tuner.LaunchInteractiveLogin(provider.Manifest.LoginUrl, AppendLog);
     }
-	
-	private async void BtnScanLineup_Click(object sender, RoutedEventArgs e)
+
+    private async void BtnScanLineup_Click(object sender, RoutedEventArgs e)
     {
         var provider = GetSelectedProvider();
         if (provider is null)
@@ -470,6 +559,20 @@ public partial class MainWindow : Window
                 AppendLog,
                 status => Dispatcher.InvokeAsync(() => TxtBusyStatus.Text = status));
 
+            // Preserve user's IsHidden preferences and manual Gracenote StationId mappings across scans
+            var previousById = provider.Channels.ToDictionary(c => c.Id, StringComparer.OrdinalIgnoreCase);
+            foreach (var ch in channels)
+            {
+                if (previousById.TryGetValue(ch.Id, out var prev))
+                {
+                    ch.IsHidden = prev.IsHidden;
+                    if (string.IsNullOrWhiteSpace(ch.StationId) && !string.IsNullOrWhiteSpace(prev.StationId))
+                    {
+                        ch.StationId = prev.StationId;
+                    }
+                }
+            }
+
             string savedPath = _providers.SaveProviderChannels(provider, channels);
             RefreshProviderDropdown();
 
@@ -494,7 +597,7 @@ public partial class MainWindow : Window
             SetBusyState(false, string.Empty);
         }
     }
-	
+
     private void SetBusyState(bool isBusy, string statusText)
     {
         BusyBanner.Visibility = isBusy ? Visibility.Visible : Visibility.Collapsed;
@@ -623,8 +726,6 @@ public partial class MainWindow : Window
 
     private void OnWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)
     {
-        // If the user clicked the X button on the window (and didn't choose "Exit Charon Server" from the tray menu),
-        // hide the dashboard to the System Tray so Charon keeps streaming in the background!
         if (!_isExplicitExit && _trayIconAdded)
         {
             e.Cancel = true;
