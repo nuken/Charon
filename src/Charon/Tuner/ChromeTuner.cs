@@ -317,14 +317,14 @@ public sealed class ChromeTuner
         return string.Join(" ",
         [
             "-hide_banner -loglevel warning",
-            "-fflags +genpts+igndts",
+            "-fflags +genpts+igndts+discardcorrupt",
             "-probesize 524288 -analyzeduration 1000000",
             "-f webm -i pipe:0",
             "-map 0:v:0 -map 0:a:0?",
             "-fps_mode passthrough -c:v copy -bsf:v h264_mp4toannexb,dump_extra",
-            "-c:a aac -b:a 256k -ar 48000 -ac 2",
-            "-af \"aresample=async=1000:first_pts=0\"",
-            "-avoid_negative_ts make_zero -max_interleave_delta 0 -muxdelay 0.05 -muxpreload 0.05 -flush_packets 1",
+            "-c:a aac -b:a 192k -ar 48000 -ac 2",
+            "-af \"aresample=async=1:min_hard_comp=0.100000:first_pts=0\"",
+            "-avoid_negative_ts make_zero -flush_packets 1",
             "-pat_period 0.25 -sdt_period 0.25 -mpegts_flags +initial_discontinuity+resend_headers -f mpegts pipe:1"
         ]);
     }
