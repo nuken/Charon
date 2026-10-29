@@ -22,11 +22,21 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock Text="CHARON STREAMING SERVER" FontWeight="Bold" FontSize="16" Foreground="#38BDF8"/>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="CHARON STREAMING SERVER" FontWeight="Bold" FontSize="16" Foreground="#38BDF8" VerticalAlignment="Center"/>
+                        <Border Background="#18181B" BorderBrush="#3F3F46" BorderThickness="1" CornerRadius="4" Padding="6,1" Margin="10,0,0,0" VerticalAlignment="Center">
+                            <TextBlock x:Name="TxtAppVersion" Text="v1.0.0" FontFamily="Consolas" FontSize="12" FontWeight="SemiBold" Foreground="#A1A1AA"/>
+                        </Border>
+                    </StackPanel>
                     <TextBlock x:Name="TxtM3uUrl" Text="http://0.0.0.0:48590/playlist.m3u" FontFamily="Consolas" FontSize="14" Margin="0,6,0,0" Foreground="#A1A1AA"/>
                 </StackPanel>
-                <Button Grid.Column="1" Content="Copy M3U URL" Click="BtnCopyM3u_Click"
-                        Padding="14,8" Background="#0284C7" Foreground="White" FontWeight="SemiBold" BorderThickness="0" VerticalAlignment="Center"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                    <Button x:Name="BtnCheckUpdate" Content="Check for Updates" Click="BtnCheckUpdate_Click"
+                            Padding="12,8" Background="#3F3F46" Foreground="#F4F4F5" FontWeight="SemiBold" BorderThickness="0" Margin="0,0,8,0"
+                            ToolTip="Check GitHub (nuken/Charon) for the latest release"/>
+                    <Button Content="Copy M3U URL" Click="BtnCopyM3u_Click"
+                            Padding="14,8" Background="#0284C7" Foreground="White" FontWeight="SemiBold" BorderThickness="0"/>
+                </StackPanel>
             </Grid>
         </Border>
 

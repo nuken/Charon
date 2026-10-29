@@ -12,6 +12,10 @@ using Charon.Providers;
 using Charon.Server;
 using Charon.Tuner;
 using Microsoft.Win32;
+using System.Diagnostics;
+using System.Net.Http;
+using System.Reflection;
+using System.Text.Json;
 
 namespace Charon;
 
@@ -23,7 +27,7 @@ public partial class MainWindow : Window
     private readonly CharonServer _server;
     private readonly bool _isInitializing = true;
     private readonly ObservableCollection<ProviderChannel> _editableChannels = [];
-
+    private static readonly HttpClient UpdateHttp = new() { Timeout = TimeSpan.FromSeconds(8) };
     // System Tray state
     private IntPtr _hwnd;
     private IntPtr _trayIconHandle;
@@ -81,6 +85,7 @@ public partial class MainWindow : Window
         TxtM3uUrl.Text = $"http://{_config.ResolvedLanIp}:{_config.ResolvedPort}/playlist.m3u";
         TxtCustomX.Text = _config.CustomX.ToString();
         TxtCustomY.Text = _config.CustomY.ToString();
+		TxtAppVersion.Text = $"v{GetCurrentAppVersion()}";
 
         SelectComboItem(CmbResolution, _config.Enable1080p ? "1080p" : "720p");
         SelectComboItem(CmbMaxTuners, _config.MaxConcurrentTuners.ToString());
@@ -493,6 +498,127 @@ public partial class MainWindow : Window
         {
             AppendLog($"[UI] Clipboard busy, please click Copy again ({ex.Message})");
         }
+    }
+	
+	private static string GetCurrentAppVersion()
+    {
+        string raw = Assembly.GetEntryAssembly()
+            ?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion
+            ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString(3)
+            ?? "1.0.0";
+
+        // Strip any git commit hash suffix (e.g. "1.0.0+abc123")
+        int plusIdx = raw.IndexOf('+');
+        if (plusIdx > 0)
+            raw = raw[..plusIdx];
+
+        return raw.TrimStart('v', 'V').Trim();
+    }
+
+    private async void BtnCheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        string localVersion = GetCurrentAppVersion();
+        BtnCheckUpdate.IsEnabled = false;
+        BtnCheckUpdate.Content = "Checking...";
+
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, "https://api.github.com/repos/nuken/Charon/releases/latest");
+            req.Headers.UserAgent.ParseAdd("Charon-Updater");
+            req.Headers.Accept.ParseAdd("application/vnd.github+json");
+
+            using var resp = await UpdateHttp.SendAsync(req);
+
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                AppendLog("[Update] No published releases found on GitHub (https://github.com/nuken/Charon/releases).");
+                MessageBox.Show(
+                    $"Current Version: v{localVersion}\n\nNo published releases were found on GitHub yet.",
+                    "Version Check",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+                return;
+            }
+
+            resp.EnsureSuccessStatusCode();
+
+            string json = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+
+            string tagName = doc.RootElement.TryGetProperty("tag_name", out var tagEl)
+                ? tagEl.GetString() ?? ""
+                : "";
+
+            string cleanRemote = tagName.Trim().TrimStart('v', 'V');
+            string releaseUrl = !string.IsNullOrWhiteSpace(tagName)
+                ? $"https://github.com/nuken/Charon/releases/tag/{tagName}"
+                : "https://github.com/nuken/Charon/releases";
+
+            if (string.IsNullOrWhiteSpace(cleanRemote))
+            {
+                MessageBox.Show("Could not read the latest release tag from GitHub.", "Version Check", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            if (IsRemoteVersionNewer(localVersion, cleanRemote))
+            {
+                AppendLog($"[Update] Update available: v{cleanRemote} (current: v{localVersion}) -> {releaseUrl}");
+                var choice = MessageBox.Show(
+                    $"A new version of Charon is available!\n\n" +
+                    $"• Installed Version: v{localVersion}\n" +
+                    $"• Latest Version: v{cleanRemote}\n\n" +
+                    $"Would you like to open the GitHub release page now?\n{releaseUrl}",
+                    "Update Available",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information);
+
+                if (choice == MessageBoxResult.Yes)
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = releaseUrl,
+                        UseShellExecute = true
+                    });
+                }
+            }
+            else
+            {
+                AppendLog($"[Update] Charon is up to date (v{localVersion}).");
+                MessageBox.Show(
+                    $"You are running the latest version of Charon (v{localVersion}).",
+                    "Up to Date",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Information);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[Update] Version check failed: {ex.Message}");
+            MessageBox.Show(
+                $"Failed to check GitHub for updates:\n\n{ex.Message}",
+                "Update Check Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+        finally
+        {
+            BtnCheckUpdate.Content = "Check for Updates";
+            BtnCheckUpdate.IsEnabled = true;
+        }
+    }
+
+    private static bool IsRemoteVersionNewer(string localVer, string remoteVer)
+    {
+        string cleanLocal = localVer.Split('-')[0].Trim();
+        string cleanRemote = remoteVer.Split('-')[0].Trim();
+
+        if (Version.TryParse(cleanLocal, out var vLocal) && Version.TryParse(cleanRemote, out var vRemote))
+        {
+            return vRemote > vLocal;
+        }
+
+        return !string.Equals(cleanLocal, cleanRemote, StringComparison.OrdinalIgnoreCase);
     }
 
     private void BtnLoginProvider_Click(object sender, RoutedEventArgs e)

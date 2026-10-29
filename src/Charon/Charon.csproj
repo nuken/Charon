@@ -31,5 +31,15 @@
       <Link>ffmpeg.exe</Link>
     </None>
   </ItemGroup>
+  
+  <Target Name="SyncVersionFromIss" BeforeTargets="GetAssemblyVersion;GenerateAssemblyInfo;PrepareForBuild">
+    <PropertyGroup>
+      <IssFilePath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\Charon.iss'))</IssFilePath>
+      <IssContent Condition="Exists('$(IssFilePath)')">$([System.IO.File]::ReadAllText('$(IssFilePath)'))</IssContent>
+      <ExtractedIssVersion Condition="'$(IssContent)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(IssContent)', '#define\s+MyAppVersion\s+&quot;([^&quot;]+)&quot;').Groups[1].Value)</ExtractedIssVersion>
+      <Version Condition="'$(ExtractedIssVersion)' != ''">$(ExtractedIssVersion)</Version>
+      <InformationalVersion Condition="'$(ExtractedIssVersion)' != ''">$(ExtractedIssVersion)</InformationalVersion>
+    </PropertyGroup>
+  </Target>
 
 </Project>
