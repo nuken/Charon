@@ -1,0 +1,49 @@
+html, body {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+  background: #000 !important;
+  cursor: none !important;
+}
+
+*:has(video) {
+  transform: none !important;
+  contain: none !important;
+}
+
+video {
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  object-fit: fill !important;
+  z-index: 2147483647 !important;
+  background: #000 !important;
+  cursor: none !important;
+  opacity: 1 !important;
+}
+
+/* Hide ABC navigation, channel carousel, EPG grid, footer, and player UI with opacity: 0 */
+.navigation__skipnav__container,
+nav.navigation,
+nav.Breadcrumbs__wrapper,
+section.tilegroup,
+.tilegroup--featuredchannels,
+section.CategoryTabs,
+div.EPG,
+footer.footer,
+fitt-web-player-ui,
+.DxcOverlay,
+.FittWebPlayerContainer-loader,
+#onetrust-consent-sdk,
+#sdk-wrapper {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

@@ -74,9 +74,10 @@ public class ProviderManager
         string defaultAetvDir = Path.Combine(_providersRoot, "AETV");
         string defaultLifetimeDir = Path.Combine(_providersRoot, "Lifetime");
 		string defaultUsaDir = Path.Combine(_providersRoot, "USA");
-		
-        string defaultHuluDir = Path.Combine(_providersRoot, "Hulu");
-        string defaultFuboDir = Path.Combine(_providersRoot, "Fubo");
+		string defaultHuluDir = Path.Combine(_providersRoot, "Hulu");
+		string defaultFuboDir = Path.Combine(_providersRoot, "Fubo");
+		string defaultAbcDir = Path.Combine(_providersRoot, "ABC");
+        		
         Directory.CreateDirectory(defaultYttvDir);
         Directory.CreateDirectory(defaultSpectrumDir);
 		Directory.CreateDirectory(defaultXfinityDir);
@@ -89,10 +90,10 @@ public class ProviderManager
         Directory.CreateDirectory(defaultAetvDir);
         Directory.CreateDirectory(defaultLifetimeDir);
 		Directory.CreateDirectory(defaultUsaDir);
+		Directory.CreateDirectory(defaultHuluDir);
+		Directory.CreateDirectory(defaultFuboDir);
+		Directory.CreateDirectory(defaultAbcDir);
 		
-        Directory.CreateDirectory(defaultHuluDir);
-        Directory.CreateDirectory(defaultFuboDir);
-
         // If someone placed channels.json directly in Providers\ root instead of Providers\YouTubeTV\, move/copy it into Providers\YouTubeTV\
         string rootChannelsFile = Path.Combine(_providersRoot, "channels.json");
         if (File.Exists(rootChannelsFile))
@@ -125,8 +126,9 @@ public class ProviderManager
         bool isLifetime = folderName.Equals("Lifetime", StringComparison.OrdinalIgnoreCase);
         bool isAeFamily = isHistory || isAetv || isLifetime;
 		bool isUsa = folderName.Equals("USA", StringComparison.OrdinalIgnoreCase);
-        bool isHulu = folderName.Equals("Hulu", StringComparison.OrdinalIgnoreCase);
-        bool isFubo = folderName.Equals("Fubo", StringComparison.OrdinalIgnoreCase);
+		bool isHulu = folderName.Equals("Hulu", StringComparison.OrdinalIgnoreCase);
+		bool isFubo = folderName.Equals("Fubo", StringComparison.OrdinalIgnoreCase);
+		bool isAbc = folderName.Equals("ABC", StringComparison.OrdinalIgnoreCase);
 
         string manifestPath = Path.Combine(dir, "provider.json");
         string altManifestPath = Path.Combine(dir, "manifest.json");
@@ -148,6 +150,7 @@ public class ProviderManager
 			: isUsa ? "USA Network (TVE)"
 			: isHulu ? "Hulu + Live TV"
 			: isFubo ? "Fubo"
+			: isAbc ? "ABC / FX / NatGeo (TVE)"
 			: folderName;
 			
         string defaultLoginUrl = isSpectrum
@@ -172,12 +175,14 @@ public class ProviderManager
             ? "https://play.mylifetime.com/live"
 			: isUsa
             ? "https://www.usanetwork.com/live"
-            : isHulu
+			: isHulu
             ? "https://www.hulu.com/live"
-            : isFubo
+			: isFubo
             ? "https://www.fubo.tv/p/home"
+			: isAbc
+            ? "https://abc.com/watch-live"
             : "https://tv.youtube.com";
-        int defaultDelayMs = isSpectrum || isSling || isPhilo || isHulu || isFubo ? 2000 : 1500;
+         int defaultDelayMs = isSpectrum || isSling || isPhilo || isHulu || isFubo ? 2000 : 1500;
 
         // Support manifest.json if present, or auto-create provider.json if missing!
         if (!File.Exists(manifestPath) && File.Exists(altManifestPath))
@@ -431,6 +436,102 @@ public class ProviderManager
                     ]
                     """;
                 File.WriteAllText(channelsPath, usaDefaultChannels, new UTF8Encoding(false));
+            }
+			else if (isAbc)
+            {
+                const string abcDefaultChannels = """
+                    [
+                      {
+                        "id": "abc-news-live",
+                        "name": "ABC News Live",
+                        "channelNumber": "251",
+                        "stationId": "113380",
+                        "url": "https://abc.com/watch-live/784b058c-3aee-4ec9-a6d3-754ba6e4dbac",
+                        "isHidden": true
+                      },
+                      {
+                        "id": "freeform-east",
+                        "name": "Freeform East",
+                        "channelNumber": "252",
+                        "stationId": "59615",
+                        "url": "https://abc.com/watch-live/885c669e-fa9a-4039-b42e-6c85c90cc86d",
+                        "isHidden": true
+                      },
+                      {
+                        "id": "freeform-west",
+                        "name": "Freeform West",
+                        "channelNumber": "253",
+                        "stationId": "63324",
+                        "url": "https://abc.com/watch-live/3507c750-e86a-4c0f-8ff4-dd23c4859009",
+                        "isHidden": true
+                      },
+                      {
+                        "id": "fx-east",
+                        "name": "FX East",
+                        "channelNumber": "254",
+                        "stationId": "58574",
+                        "url": "https://abc.com/watch-live/93256af4-5e80-4558-aa2e-2bdfffa119a0",
+                        "isHidden": true
+                      },
+                      {
+                        "id": "fx-west",
+                        "name": "FX West",
+                        "channelNumber": "255",
+                        "stationId": "59814",
+                        "url": "https://abc.com/watch-live/2cee3401-f63b-42d0-b32e-962fef610b9e",
+                        "isHidden": true
+                      },
+                      {
+                        "id": "fxm",
+                        "name": "FXM",
+                        "channelNumber": "256",
+                        "stationId": "70253",
+                        "url": "https://abc.com/watch-live/d298ab7e-c6b1-4efa-ac6e-a52dceed92ee",
+                        "isHidden": true
+                      },
+                      {
+                        "id": "fxx-east",
+                        "name": "FXX East",
+                        "channelNumber": "257",
+                        "stationId": "66379",
+                        "url": "https://abc.com/watch-live/49f4a471-8d36-4728-8457-ea65cbbc84ea",
+                        "isHidden": true
+                      },
+                      {
+                        "id": "fxx-west",
+                        "name": "FXX West",
+                        "channelNumber": "258",
+                        "stationId": "82571",
+                        "url": "https://abc.com/watch-live/e4c83395-62ed-4a49-829a-c55ab3c33e7d",
+                        "isHidden": true
+                      },
+                      {
+                        "id": "nat-geo-east",
+                        "name": "Nat Geo East",
+                        "channelNumber": "259",
+                        "stationId": "49438",
+                        "url": "https://abc.com/watch-live/0826a9a3-3384-4bb5-8841-91f01cb0e3a7",
+                        "isHidden": true
+                      },
+                      {
+                        "id": "nat-geo-west",
+                        "name": "Nat Geo West",
+                        "channelNumber": "260",
+                        "stationId": "71601",
+                        "url": "https://abc.com/watch-live/91456580-f32f-417c-8e1a-9f82640832a7",
+                        "isHidden": true
+                      },
+                      {
+                        "id": "nat-geo-wild",
+                        "name": "Nat Geo Wild",
+                        "channelNumber": "261",
+                        "stationId": "67331",
+                        "url": "https://abc.com/watch-live/239b9590-583f-4955-a499-22e9eefff9cf",
+                        "isHidden": true
+                      }
+                    ]
+                    """;
+                File.WriteAllText(channelsPath, abcDefaultChannels, new UTF8Encoding(false));
             }
             else
             {
@@ -1639,8 +1740,8 @@ public class ProviderManager
                 """;
             File.WriteAllText(tuneJsPath, cnnTuneJs, new UTF8Encoding(false));
         }
-
-        if (isHulu)
+		
+		if (isHulu)
         {
             const string huluStyleCss = """
                 html, body {
@@ -1850,8 +1951,8 @@ public class ProviderManager
                 """;
             File.WriteAllText(tuneJsPath, huluTuneJs, new UTF8Encoding(false));
         }
-
-        if (isFubo)
+		
+		if (isFubo)
         {
             const string fuboStyleCss = """
                 html, body {
@@ -2047,6 +2148,187 @@ public class ProviderManager
                 })();
                 """;
             File.WriteAllText(tuneJsPath, fuboTuneJs, new UTF8Encoding(false));
+        }
+		
+		if (isAbc)
+        {
+            const string abcStyleCss = """
+                html, body {
+                  margin: 0 !important;
+                  padding: 0 !important;
+                  width: 100vw !important;
+                  height: 100vh !important;
+                  overflow: hidden !important;
+                  background: #000 !important;
+                  cursor: none !important;
+                }
+
+                *:has(video) {
+                  transform: none !important;
+                  contain: none !important;
+                }
+
+                video {
+                  position: fixed !important;
+                  inset: 0 !important;
+                  top: 0 !important;
+                  left: 0 !important;
+                  width: 100vw !important;
+                  height: 100vh !important;
+                  margin: 0 !important;
+                  max-width: none !important;
+                  max-height: none !important;
+                  object-fit: fill !important;
+                  z-index: 2147483647 !important;
+                  background: #000 !important;
+                  cursor: none !important;
+                  opacity: 1 !important;
+                }
+
+                /* Hide ABC navigation, channel carousel, EPG grid, footer, and player UI with opacity: 0 */
+                .navigation__skipnav__container,
+                nav.navigation,
+                nav.Breadcrumbs__wrapper,
+                section.tilegroup,
+                .tilegroup--featuredchannels,
+                section.CategoryTabs,
+                div.EPG,
+                footer.footer,
+                fitt-web-player-ui,
+                .DxcOverlay,
+                .FittWebPlayerContainer-loader,
+                #onetrust-consent-sdk,
+                #sdk-wrapper {
+                  opacity: 0 !important;
+                  pointer-events: none !important;
+                }
+                """;
+            File.WriteAllText(styleCssPath, abcStyleCss, new UTF8Encoding(false));
+
+            const string abcTuneJs = """
+                (function () {
+                  try {
+                    const blockHeavyCodecs = (mimeType) => {
+                      if (typeof mimeType !== 'string') return false;
+                      return mimeType.toLowerCase().includes('av01');
+                    };
+                    if (window.MediaSource && !window.__charonCodecLocked) {
+                      window.__charonCodecLocked = true;
+                      const origIsTypeSupported = window.MediaSource.isTypeSupported.bind(window.MediaSource);
+                      window.MediaSource.isTypeSupported = function (mimeType) {
+                        if (blockHeavyCodecs(mimeType)) return false;
+                        return origIsTypeSupported(mimeType);
+                      };
+                    }
+                    if (window.HTMLMediaElement && !window.__charonCanPlayLocked) {
+                      window.__charonCanPlayLocked = true;
+                      const origCanPlayType = window.HTMLMediaElement.prototype.canPlayType;
+                      window.HTMLMediaElement.prototype.canPlayType = function (mimeType) {
+                        if (blockHeavyCodecs(mimeType)) return '';
+                        return origCanPlayType.call(this, mimeType);
+                      };
+                    }
+                    if (navigator.userActivation) {
+                      Object.defineProperty(navigator.userActivation, 'isActive', { get: () => true });
+                      Object.defineProperty(navigator.userActivation, 'hasBeenActive', { get: () => true });
+                    }
+                  } catch {}
+
+                  const queryAllDeep = (selector, root = document) => {
+                    const results = Array.from(root.querySelectorAll(selector));
+                    const all = root.querySelectorAll('*');
+                    for (const el of all) {
+                      if (el.shadowRoot) {
+                        results.push(...queryAllDeep(selector, el.shadowRoot));
+                      }
+                    }
+                    return results;
+                  };
+
+                  const injectStaticCss = () => {
+                    if (!document.getElementById('charon-static-css') && (document.head || document.documentElement)) {
+                      const s = document.createElement('style');
+                      s.id = 'charon-static-css';
+                      s.textContent = `
+                        html, body { background: #000 !important; overflow: hidden !important; margin: 0 !important; padding: 0 !important; cursor: none !important; }
+                        *:has(video) { transform: none !important; contain: none !important; }
+                        video { position: fixed !important; inset: 0 !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; margin: 0 !important; max-width: none !important; max-height: none !important; object-fit: fill !important; z-index: 2147483647 !important; background: #000 !important; cursor: none !important; opacity: 1 !important; }
+                        .navigation__skipnav__container, nav.navigation, nav.Breadcrumbs__wrapper, section.tilegroup, .tilegroup--featuredchannels, section.CategoryTabs, div.EPG, footer.footer, fitt-web-player-ui, .DxcOverlay, .FittWebPlayerContainer-loader, #onetrust-consent-sdk, #sdk-wrapper {
+                          opacity: 0 !important; pointer-events: none !important;
+                        }
+                      `;
+                      (document.head || document.documentElement).appendChild(s);
+                    }
+                  };
+
+                  const findMainVideo = () =>
+                    queryAllDeep('video')
+                      .sort((a, b) => (b.videoWidth * b.videoHeight) - (a.videoWidth * a.videoHeight))[0];
+
+                  window.__charonIsPaused = () => {
+                    const v = findMainVideo();
+                    if (!v) return false;
+                    return v.paused;
+                  };
+
+                  const checkPlayer = () => {
+                    injectStaticCss();
+
+                    // Hide any Shadow DOM UI overlays inside fitt-web-player-ui or disney-web-player
+                    for (const ui of queryAllDeep('fitt-web-player-ui, .DxcOverlay, [class*="controls" i], [class*="overlay" i]')) {
+                      if (ui.tagName !== 'VIDEO' && !ui.querySelector?.('video') && ui.style) {
+                        ui.style.setProperty('opacity', '0', 'important');
+                        ui.style.setProperty('pointer-events', 'none', 'important');
+                      }
+                    }
+
+                    const v = findMainVideo();
+                    if (!v) return;
+
+                    // 1. Play FIRST while muted so Chrome autoplay never blocks it
+                    if (v.paused) {
+                      const playBtn = queryAllDeep('button[aria-label*="Play" i], button[title*="Play" i]')[0];
+                      if (playBtn) playBtn.click();
+                      v.play().catch(() => {});
+                    }
+
+                    // 2. Unmute once playing
+                    if (!v.paused && (v.muted || v.volume === 0)) {
+                      const unmuteBtn = queryAllDeep('button[aria-label*="Unmute" i], button[title*="Unmute" i], button[aria-label*="Mute" i][aria-pressed="true"]')[0];
+                      if (unmuteBtn) unmuteBtn.click();
+                      v.muted = false;
+                      v.volume = 1.0;
+                    } else if (!v.paused && v.volume < 1.0) {
+                      v.volume = 1.0;
+                    }
+
+                    if (!v.__charonStyled) {
+                      v.__charonStyled = true;
+                      v.style.cssText = [
+                        'background: black !important',
+                        'cursor: none !important',
+                        'display: block !important',
+                        'height: 100vh !important',
+                        'width: 100vw !important',
+                        'left: 0 !important',
+                        'top: 0 !important',
+                        'margin: 0 !important',
+                        'max-height: none !important',
+                        'max-width: none !important',
+                        'object-fit: fill !important',
+                        'position: fixed !important',
+                        'z-index: 2147483647 !important'
+                      ].join('; ');
+                    }
+                  };
+
+                  checkPlayer();
+                  if (window.__charonTunerActive) return;
+                  window.__charonTunerActive = true;
+                  setInterval(checkPlayer, 300);
+                })();
+                """;
+            File.WriteAllText(tuneJsPath, abcTuneJs, new UTF8Encoding(false));
         }
 
         ProviderManifest? manifest = null;
@@ -2629,10 +2911,11 @@ public class ProviderManager
          providerId.Equals("spectrum", StringComparison.OrdinalIgnoreCase) ||
          providerId.Equals("xfinity", StringComparison.OrdinalIgnoreCase) ||
 		 providerId.Equals("philo", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Equals("hulu", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Equals("fubo", StringComparison.OrdinalIgnoreCase) ||
+		 providerId.Equals("hulu", StringComparison.OrdinalIgnoreCase) ||
+		 providerId.Equals("fubo", StringComparison.OrdinalIgnoreCase) ||
 		 providerId.Equals("sling", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Equals("nbc", StringComparison.OrdinalIgnoreCase));
+         providerId.Equals("nbc", StringComparison.OrdinalIgnoreCase) ||
+         providerId.Equals("abc", StringComparison.OrdinalIgnoreCase));
 
     public static List<ProviderChannel> ParseChannelsJson(string json)
     {

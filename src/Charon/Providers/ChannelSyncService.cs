@@ -19,11 +19,12 @@ public class ChannelSyncService
          providerId.Contains("spectrum", StringComparison.OrdinalIgnoreCase) ||
          providerId.Contains("xfinity", StringComparison.OrdinalIgnoreCase) ||
 		 providerId.Contains("philo", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Contains("hulu", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Contains("fubo", StringComparison.OrdinalIgnoreCase) ||
+		 providerId.Contains("hulu", StringComparison.OrdinalIgnoreCase) ||
+		 providerId.Contains("fubo", StringComparison.OrdinalIgnoreCase) ||
 		 providerId.Contains("sling", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Contains("nbc", StringComparison.OrdinalIgnoreCase));
-
+         providerId.Contains("nbc", StringComparison.OrdinalIgnoreCase) ||
+         providerId.Contains("abc", StringComparison.OrdinalIgnoreCase));
+		 
     public static async Task<(List<ProviderChannel> Channels, int MatchedCount)> ScanAndMatchAsync(
         CharonConfig config,
         LoadedProvider provider,
@@ -90,8 +91,9 @@ public class ChannelSyncService
         bool isSling = provider.Manifest.Id.Contains("sling", StringComparison.OrdinalIgnoreCase);
 		bool isPhilo = provider.Manifest.Id.Contains("philo", StringComparison.OrdinalIgnoreCase);
 		bool isNbc = provider.Manifest.Id.Contains("nbc", StringComparison.OrdinalIgnoreCase);
-        bool isHulu = provider.Manifest.Id.Contains("hulu", StringComparison.OrdinalIgnoreCase);
-        bool isFubo = provider.Manifest.Id.Contains("fubo", StringComparison.OrdinalIgnoreCase);
+		bool isHulu = provider.Manifest.Id.Contains("hulu", StringComparison.OrdinalIgnoreCase);
+		bool isFubo = provider.Manifest.Id.Contains("fubo", StringComparison.OrdinalIgnoreCase);
+		bool isAbc = provider.Manifest.Id.Contains("abc", StringComparison.OrdinalIgnoreCase);
 		string targetUrl = isSpectrum
             ? "https://watch.spectrum.net/guide"
             : isXfinity
@@ -103,11 +105,13 @@ public class ChannelSyncService
             ? "https://www.philo.com/player/mytv"
 			: isNbc 
 			? "https://www.nbc.com/live"
-            : isHulu
+			: isHulu
             ? "https://www.hulu.com/live"
-            : isFubo
+			: isFubo
             // Start on Home, not the guide: the scraper must hook the guide request before it is sent
             ? "https://www.fubo.tv/p/home"
+			: isAbc
+            ? "https://abc.com/watch-live"
             : "https://tv.youtube.com/live";
 
         int posX = config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : -3200;
@@ -284,7 +288,7 @@ public class ChannelSyncService
                 }
                 return [];
             }
-            else if (isHulu)
+			else if (isHulu)
             {
                 // Hulu: read the live guide's full channel list from the web app's Redux store
                 string huluJs = GetHuluScraperJs();
@@ -316,7 +320,7 @@ public class ChannelSyncService
 
                 return [];
             }
-            else if (isFubo)
+			else if (isFubo)
             {
                 // Fubo: capture the guide's own channel-list response (only the account's subscribed channels)
                 string fuboJs = GetFuboScraperJs();
@@ -346,6 +350,32 @@ public class ChannelSyncService
                     await Task.Delay(1500);
                 }
 
+                return [];
+            }
+			else if (isAbc)
+            {
+                string abcJs = GetAbcScraperJs();
+                var deadline = DateTime.UtcNow.AddSeconds(25);
+
+                while (DateTime.UtcNow < deadline)
+                {
+                    statusCallback($"Step 1/2: Resolving local ABC affiliate & lineup via abc.com/watch-live...");
+                    string? res = await EvaluateJsStringAsync(ws, 1, abcJs);
+
+                    if (!string.IsNullOrWhiteSpace(res))
+                    {
+                        if (res.StartsWith("{\"status\":", StringComparison.Ordinal))
+                        {
+                            log($"[Sync] {res}");
+                        }
+                        else if (res.StartsWith("[", StringComparison.Ordinal) && res != "[]")
+                        {
+                            var parsed = ProviderManager.ParseChannelsJson(res);
+                            if (parsed.Count > 0) return parsed;
+                        }
+                    }
+                    await Task.Delay(1000);
+                }
                 return [];
             }
             else
@@ -1056,7 +1086,7 @@ public class ChannelSyncService
         })();
         """;
 		
-    private static string GetHuluScraperJs() => """
+		private static string GetHuluScraperJs() => """
         (async () => {
           const status = (s, extra) => JSON.stringify(Object.assign({ status: s, url: location.origin + location.pathname }, extra || {}));
 
@@ -1098,8 +1128,8 @@ public class ChannelSyncService
           return JSON.stringify(results);
         })()
         """;
-
-    private static string GetFuboScraperJs() => """
+		
+		private static string GetFuboScraperJs() => """
         (async () => {
           const status = (s, extra) => JSON.stringify(Object.assign({ status: s, url: location.origin + location.pathname }, extra || {}));
 
@@ -1177,7 +1207,101 @@ public class ChannelSyncService
           return JSON.stringify(results);
         })()
         """;
+		
+		private static string GetAbcScraperJs() => """
+        (() => {
+          if (!location.hostname.includes('abc.com')) {
+            return JSON.stringify({ status: 'waiting_for_page', url: location.href });
+          }
 
+          // Wait until the client-side router has resolved /watch-live/<local-uuid> and rendered the first carousel tile
+          const firstTile = document.querySelector('a.AnchorLink[aria-label^="ABC (1 of "]')
+            || Array.from(document.querySelectorAll('a[aria-label]')).find(a => /^ABC\s*\(1 of \d+\)/i.test(a.getAttribute('aria-label') || ''));
+          const pathUuidMatch = location.pathname.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+
+          window.__charonAbcAttempts = (window.__charonAbcAttempts || 0) + 1;
+          if ((!firstTile || !pathUuidMatch) && window.__charonAbcAttempts <= 10) {
+            return JSON.stringify({ status: 'waiting_for_local_affiliate_redirect', url: location.href });
+          }
+
+          // Core National lineup with verified permanent UUIDs and Gracenote StationIds
+          const coreNational = [
+            { Id: "abc-news-live", Name: "ABC News Live", ChannelNumber: "251", StationId: "113380", Url: "https://abc.com/watch-live/784b058c-3aee-4ec9-a6d3-754ba6e4dbac", IsHidden: false },
+            { Id: "freeform-east", Name: "Freeform East", ChannelNumber: "252", StationId: "59615", Url: "https://abc.com/watch-live/885c669e-fa9a-4039-b42e-6c85c90cc86d", IsHidden: false },
+            { Id: "freeform-west", Name: "Freeform West", ChannelNumber: "253", StationId: "63324", Url: "https://abc.com/watch-live/3507c750-e86a-4c0f-8ff4-dd23c4859009", IsHidden: true },
+            { Id: "fx-east", Name: "FX East", ChannelNumber: "254", StationId: "58574", Url: "https://abc.com/watch-live/93256af4-5e80-4558-aa2e-2bdfffa119a0", IsHidden: false },
+            { Id: "fx-west", Name: "FX West", ChannelNumber: "255", StationId: "59814", Url: "https://abc.com/watch-live/2cee3401-f63b-42d0-b32e-962fef610b9e", IsHidden: true },
+            { Id: "fxm", Name: "FXM", ChannelNumber: "256", StationId: "70253", Url: "https://abc.com/watch-live/d298ab7e-c6b1-4efa-ac6e-a52dceed92ee", IsHidden: false },
+            { Id: "fxx-east", Name: "FXX East", ChannelNumber: "257", StationId: "66379", Url: "https://abc.com/watch-live/49f4a471-8d36-4728-8457-ea65cbbc84ea", IsHidden: false },
+            { Id: "fxx-west", Name: "FXX West", ChannelNumber: "258", StationId: "82571", Url: "https://abc.com/watch-live/e4c83395-62ed-4a49-829a-c55ab3c33e7d", IsHidden: true },
+            { Id: "nat-geo-east", Name: "Nat Geo East", ChannelNumber: "259", StationId: "49438", Url: "https://abc.com/watch-live/0826a9a3-3384-4bb5-8841-91f01cb0e3a7", IsHidden: false },
+            { Id: "nat-geo-west", Name: "Nat Geo West", ChannelNumber: "260", StationId: "71601", Url: "https://abc.com/watch-live/91456580-f32f-417c-8e1a-9f82640832a7", IsHidden: true },
+            { Id: "nat-geo-wild", Name: "Nat Geo Wild", ChannelNumber: "261", StationId: "67331", Url: "https://abc.com/watch-live/239b9590-583f-4955-a499-22e9eefff9cf", IsHidden: false }
+          ];
+
+          const results = [];
+          const seenUuids = new Set();
+
+          // 1. Add Local ABC Affiliate first (e.g. WSOC -> matched to 11849 by Channels DVR)
+          if (firstTile && pathUuidMatch) {
+            const localUuid = pathUuidMatch[1].toLowerCase();
+            const aria = firstTile.getAttribute('aria-label') || '';
+            const callMatch = aria.match(/^ABC\s*\(1 of \d+\)\s+([WK][A-Z0-9]{2,4})\b/i);
+            const callSign = callMatch ? callMatch[1].toUpperCase() : 'ABC Local';
+
+            const isStaticNational = coreNational.some(c => c.Url.toLowerCase().includes(localUuid));
+            const localUrl = isStaticNational ? 'https://abc.com/watch-live' : `https://abc.com/watch-live/${localUuid}`;
+
+            if (!isStaticNational) seenUuids.add(localUuid);
+
+            results.push({
+              Id: "abc-local",
+              Name: callSign,
+              ChannelNumber: "250",
+              StationId: "", // Left blank so MatchGracenoteStationsAsync resolves WSOC -> 11849!
+              Url: localUrl,
+              IsHidden: false
+            });
+          }
+
+          // 2. Add all 11 Core National channels
+          for (const ch of coreNational) {
+            const m = ch.Url.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+            if (m) seenUuids.add(m[1].toLowerCase());
+            results.push(ch);
+          }
+
+          // 3. Also append any regional O&O FAST streams from window['__abc-com__'] (hidden by default)
+          const modules = window['__abc-com__']?.page?.content?.shell?.module || [];
+          const rawChannels = modules.flatMap(m => m?.channels || []).filter(c => c && c.urlValue);
+          let extraNum = 262;
+
+          for (const c of rawChannels) {
+            const uuidMatch = String(c.urlValue || '').match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+            if (!uuidMatch) continue;
+
+            const uuid = uuidMatch[1].toLowerCase();
+            if (seenUuids.has(uuid)) continue;
+            seenUuids.add(uuid);
+
+            const rawTitle = String(c.title || '').trim();
+            if (!rawTitle) continue;
+
+            const slug = rawTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+            results.push({
+              Id: slug,
+              Name: rawTitle,
+              ChannelNumber: String(extraNum++),
+              StationId: "",
+              Url: `https://abc.com/watch-live/${uuid}`,
+              IsHidden: true
+            });
+          }
+
+          return JSON.stringify(results);
+        })()
+        """;
+		
     // Direct, verified Gracenote TMS StationId table (East/Central/Mountain ID, Pacific ID)
     // Bypasses fuzzy text search completely for core national networks!
     private static readonly Dictionary<string, (string EastId, string WestId)> VerifiedGracenoteStationIds =
@@ -1228,7 +1352,7 @@ public class ChannelSyncService
         { "A&E",                        ("51529",  "73992") },
         { "Arts and Entertainment",     ("51529",  "73992") },
         { "History",                    ("57708",  "73993") },
-        { "The HISTORY Channel",        ("57708",  "73993") },
+		{ "The HISTORY Channel",        ("57708",  "73993") },
         { "Lifetime",                   ("60150",  "73997") },
         { "Lifetime Networks",          ("60150",  "73997") },
         { "LMN",                        ("55887",  "55887") },
@@ -1270,7 +1394,7 @@ public class ChannelSyncService
         { "Comet",                      ("97051",  "97051") },
         { "CHARGE!",                    ("102148", "102148") },
         { "Cozi",                       ("89994",  "89994") },
-        { "Cozi TV",                    ("89994",  "89994") },
+		{ "Cozi TV",                    ("89994",  "89994") },
         { "Start TV",                   ("109454", "109454") },
         { "Start TV Network",           ("109454", "109454") },
         { "Dabl",                       ("112157", "112157") },
@@ -1444,8 +1568,8 @@ public class ChannelSyncService
 
             string rawName = ch.Name.Trim();
             TmsStation? match = null;
-
-            // Hulu titles separate feeds "TBS (East)" / "TBS (West)": look up the base name and take that feed's ID
+			
+			 // Hulu titles separate feeds "TBS (East)" / "TBS (West)": look up the base name and take that feed's ID
             string lookupName = rawName;
             bool useWestFeed = preferPacific;
             var feedMatch = System.Text.RegularExpressions.Regex.Match(

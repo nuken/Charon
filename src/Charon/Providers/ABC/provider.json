@@ -1,0 +1,8 @@
+{
+  "id": "abc",
+  "name": "ABC / FX / NatGeo (TVE)",
+  "groupTitle": "ABC / FX / NatGeo (TVE)",
+  "enabled": true,
+  "loginUrl": "https://abc.com/watch-live",
+  "tuneScriptDelayMs": 1500
+}
