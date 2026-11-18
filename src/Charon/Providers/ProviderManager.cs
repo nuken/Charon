@@ -2789,6 +2789,37 @@ public class ProviderManager
                     }, 400);
                   };
 
+                  // Replicates clicking the LIVE button on the player to recover from mid-stream SSAI freezes
+                  const kickSeekToLive = (v) => {
+                    const vjs = getVjsPlayer(v);
+                    const liveBtn = document.querySelector('.vjs-seek-to-live-control, button[title*="Live" i], .vjs-live-control');
+
+                    let clicked = false;
+                    try {
+                      if (vjs && vjs.liveTracker && typeof vjs.liveTracker.seekToLiveEdge === 'function') {
+                        vjs.liveTracker.seekToLiveEdge();
+                        clicked = true;
+                      }
+                    } catch {}
+
+                    if (liveBtn) {
+                      try {
+                        liveBtn.click();
+                        clicked = true;
+                      } catch {}
+                    }
+
+                    if (v.buffered && v.buffered.length > 0) {
+                      try { v.currentTime = v.buffered.end(v.buffered.length - 1) - 0.5; } catch {}
+                    }
+
+                    if (!clicked || v.paused) {
+                      kickPausePlay(v);
+                    } else {
+                      v.play().catch(() => {});
+                    }
+                  };
+
                   window.__charonIsPaused = () => {
                     if (window.__charonUsaKicking) return false;
                     const v = findMainVideo();
@@ -2836,26 +2867,40 @@ public class ProviderManager
                       }
                     }
 
-                    // 4. Ongoing Decoded-Frame & Time Stall Watchdog:
-                    // Checks both currentTime AND totalVideoFrames (catches freezes where audio continues or time ticks)
-                    const frames = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality().totalVideoFrames : v.webkitDecodedFrameCount || 0;
+                    // 4. Ongoing Time & Frame Progress Watchdog:
+                    // Every 2 seconds, verify currentTime advanced by >= 0.1s AND decoded frames advanced.
+                    // If frozen, click the LIVE button / seekToLiveEdge() to jump past the stuck SSAI segment.
                     const time = v.currentTime;
+                    const frames = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality().totalVideoFrames : (v.webkitDecodedFrameCount || 0);
 
                     if (time > 0 && window.__charonDidInitialKick) {
-                      const timeStuck = window.__charonLastTime === time;
-                      const framesStuck = frames > 0 && window.__charonLastFrames === frames;
-
-                      if (timeStuck || framesStuck) {
-                        window.__charonStallTicks = (window.__charonStallTicks || 0) + 1;
-                        if (window.__charonStallTicks >= 6) { // ~1.8 seconds frozen
-                          window.__charonStallTicks = 0;
-                          kickPausePlay(v);
-                          return;
-                        }
-                      } else {
+                      if (!window.__charonLastCheckTime) {
                         window.__charonLastTime = time;
                         window.__charonLastFrames = frames;
+                        window.__charonLastCheckTime = Date.now();
                         window.__charonStallTicks = 0;
+                      } else {
+                        const now = Date.now();
+                        const elapsed = now - window.__charonLastCheckTime;
+
+                        if (elapsed >= 2000) {
+                          const timeAdvanced = time - window.__charonLastTime;
+                          const framesStuck = frames > 0 && window.__charonLastFrames > 0 && (frames - window.__charonLastFrames) < 2;
+
+                          if (timeAdvanced < 0.1 || framesStuck) {
+                            window.__charonStallTicks = (window.__charonStallTicks || 0) + 1;
+                            if (window.__charonStallTicks >= 1) {
+                              window.__charonStallTicks = 0;
+                              kickSeekToLive(v);
+                            }
+                          } else {
+                            window.__charonStallTicks = 0;
+                          }
+
+                          window.__charonLastTime = time;
+                          window.__charonLastFrames = frames;
+                          window.__charonLastCheckTime = now;
+                        }
                       }
                     }
 
