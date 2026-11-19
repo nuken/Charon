@@ -1,0 +1,8 @@
+{
+  "id": "fox",
+  "name": "FOX One (TVE)",
+  "groupTitle": "FOX One (TVE)",
+  "enabled": true,
+  "loginUrl": "https://www.fox.com/live/channels",
+  "tuneScriptDelayMs": 1500
+}

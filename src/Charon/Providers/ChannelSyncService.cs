@@ -24,7 +24,8 @@ public class ChannelSyncService
 		 providerId.Contains("sling", StringComparison.OrdinalIgnoreCase) ||
          providerId.Contains("nbc", StringComparison.OrdinalIgnoreCase) ||
          providerId.Contains("abc", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Contains("cbs", StringComparison.OrdinalIgnoreCase));
+         providerId.Contains("cbs", StringComparison.OrdinalIgnoreCase) ||
+         providerId.Contains("fox", StringComparison.OrdinalIgnoreCase));
 		 
     public static async Task<(List<ProviderChannel> Channels, int MatchedCount)> ScanAndMatchAsync(
         CharonConfig config,
@@ -96,6 +97,7 @@ public class ChannelSyncService
 		bool isFubo = provider.Manifest.Id.Contains("fubo", StringComparison.OrdinalIgnoreCase);
 		bool isAbc = provider.Manifest.Id.Contains("abc", StringComparison.OrdinalIgnoreCase);
 		bool isCbs = provider.Manifest.Id.Contains("cbs", StringComparison.OrdinalIgnoreCase);
+		bool isFox = provider.Manifest.Id.Contains("fox", StringComparison.OrdinalIgnoreCase);
 		string targetUrl = isSpectrum
             ? "https://watch.spectrum.net/guide"
             : isXfinity
@@ -116,6 +118,8 @@ public class ChannelSyncService
             ? "https://abc.com/watch-live"
 			: isCbs
             ? "https://www.cbs.com/live-tv/stream/tveverywhere/"
+			: isFox
+            ? "https://www.fox.com/live/channels"
             : "https://tv.youtube.com/live";
 
         int posX = config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : -3200;
@@ -391,6 +395,32 @@ public class ChannelSyncService
                 {
                     statusCallback($"Step 1/2: Resolving local CBS affiliate via cbs.com...");
                     string? res = await EvaluateJsStringAsync(ws, 1, cbsJs);
+
+                    if (!string.IsNullOrWhiteSpace(res))
+                    {
+                        if (res.StartsWith("{\"status\":", StringComparison.Ordinal))
+                        {
+                            log($"[Sync] {res}");
+                        }
+                        else if (res.StartsWith("[", StringComparison.Ordinal) && res != "[]")
+                        {
+                            var parsed = ProviderManager.ParseChannelsJson(res);
+                            if (parsed.Count > 0) return parsed;
+                        }
+                    }
+                    await Task.Delay(1000);
+                }
+                return [];
+            }
+			else if (isFox)
+            {
+                string foxJs = GetFoxScraperJs();
+                var deadline = DateTime.UtcNow.AddSeconds(25);
+
+                while (DateTime.UtcNow < deadline)
+                {
+                    statusCallback($"Step 1/2: Scraping FOX One live channels & local affiliate via fox.com...");
+                    string? res = await EvaluateJsStringAsync(ws, 1, foxJs);
 
                     if (!string.IsNullOrWhiteSpace(res))
                     {
@@ -1414,6 +1444,105 @@ public class ChannelSyncService
           }
 
           return JSON.stringify(results);
+        })()
+        """;
+		
+		private static string GetFoxScraperJs() => """
+        (async () => {
+          if (!location.hostname.includes('fox.com')) {
+            return JSON.stringify({ status: 'waiting_for_page', url: location.href });
+          }
+
+          const initialLogos = document.querySelectorAll('[data-testid="GuideChannelLogo"] button');
+          const watchEl = document.querySelector('a[href^="/watch/epg/"]');
+
+          window.__charonFoxAttempts = (window.__charonFoxAttempts || 0) + 1;
+          if ((initialLogos.length < 3 || !watchEl) && window.__charonFoxAttempts <= 12) {
+            return JSON.stringify({
+              status: 'waiting_for_fox_guide',
+              logosFound: initialLogos.length,
+              hasWatchLink: !!watchEl,
+              url: location.href
+            });
+          }
+
+          // Extract local FOX call sign (e.g. WJZY) from the hero Watch Live link
+          let localCallSign = '';
+          const watchHref = watchEl?.getAttribute('href') || '';
+          const callMatch = watchHref.match(/\/watch\/epg\/([WK][A-Z]{2,3})-program-/i);
+          if (callMatch) localCallSign = callMatch[1].toUpperCase();
+
+          const friendlyNames = {
+            FOXD2C: localCallSign || 'FOX Local',
+            FNC: 'FOX News',
+            FS1: 'FS1',
+            FS2: 'FS2',
+            BTN: 'Big Ten Network',
+            FWX: 'FOX Weather',
+            FBN: 'FOX Business',
+            FOXD: 'FOX Deportes',
+            TMZ: 'TMZ',
+            SOUL: 'FOX Soul',
+            FMSC: 'FOX Music',
+            LIVENOW: 'LiveNOW from FOX',
+            JUSTICE: 'Justice Central',
+            FNT: 'FOX Nation'
+          };
+
+          const coreCodes = new Set(['FOXD2C', 'FNC', 'FS1', 'FS2', 'BTN', 'FWX', 'FBN']);
+          const channels = new Map();
+          let chNum = 280;
+
+          const harvestVisible = () => {
+            for (const btn of document.querySelectorAll('[data-testid="GuideChannelLogo"] button')) {
+              const code = (btn.getAttribute('aria-label') || btn.querySelector('img')?.getAttribute('alt') || '').trim().toUpperCase();
+              if (!code || channels.has(code)) continue;
+
+              const name = friendlyNames[code] || code;
+              channels.set(code, {
+                Id: code === 'FOXD2C' && localCallSign
+                  ? `fox-local-${localCallSign.toLowerCase()}`
+                  : `fox-${code.toLowerCase()}`,
+                Name: name,
+                ChannelNumber: String(chNum++),
+                StationId: '',
+                Url: `https://www.fox.com/live/channels#charon_channel=${encodeURIComponent(code)}`,
+                IsHidden: !coreCodes.has(code)
+              });
+            }
+          };
+
+          // Scroll through the Radix scroll area so any virtualized/below-the-fold rows mount
+          const scroller = document.querySelector('[data-radix-scroll-area-viewport]')
+            || document.querySelector('[data-testid="ChannelsScrollArea"]')
+            || document.scrollingElement;
+
+          if (scroller) scroller.scrollTop = 0;
+          await new Promise(r => setTimeout(r, 300));
+          harvestVisible();
+
+          let lastTop = -1;
+          let stagnant = 0;
+          for (let i = 0; i < 20; i++) {
+            if (!scroller) break;
+            scroller.scrollTop += 400;
+            await new Promise(r => setTimeout(r, 200));
+            harvestVisible();
+
+            if (scroller.scrollTop === lastTop) {
+              stagnant++;
+              if (stagnant >= 2) break;
+            } else {
+              stagnant = 0;
+              lastTop = scroller.scrollTop;
+            }
+          }
+
+          if (channels.size === 0) {
+            return JSON.stringify({ status: 'waiting_for_fox_guide', url: location.href });
+          }
+
+          return JSON.stringify(Array.from(channels.values()));
         })()
         """;
 		

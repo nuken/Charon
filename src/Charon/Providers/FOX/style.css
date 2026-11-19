@@ -1,0 +1,60 @@
+html, body {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+  background: #000 !important;
+  cursor: none !important;
+}
+
+/* Full-screen black curtain covering the entire viewport until playback starts */
+html::after {
+  content: "" !important;
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  background: #000 !important;
+  z-index: 2147483647 !important;
+  pointer-events: none !important;
+}
+
+html.charon-playing::after {
+  display: none !important;
+}
+
+*:has(video) {
+  transform: none !important;
+  filter: none !important;
+  perspective: none !important;
+  will-change: auto !important;
+  contain: none !important;
+}
+
+video {
+  position: fixed !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  margin: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  object-fit: fill !important;
+  z-index: 2147483646 !important;
+  background: #000 !important;
+  cursor: none !important;
+  opacity: 1 !important;
+}
+
+header, nav, footer,
+[data-testid="ChannelsPage"],
+[data-testid="ChannelsScrollArea"],
+[class*="controls" i],
+[class*="overlay" i],
+#onetrust-consent-sdk {
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
