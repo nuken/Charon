@@ -26,20 +26,40 @@
     }
   } catch {}
 
-  const injectStaticCss = () => {
-    if (!document.getElementById('charon-static-css') && (document.head || document.documentElement)) {
-      const s = document.createElement('style');
-      s.id = 'charon-static-css';
-      s.textContent = `
-        html, body { background: #000 !important; overflow: hidden !important; margin: 0 !important; padding: 0 !important; cursor: none !important; }
-        *:has(video) { transform: none !important; contain: none !important; }
-        video, video#epg-player_html5_api, .vjs-tech { position: fixed !important; inset: 0 !important; top: 0 !important; left: 0 !important; width: 100vw !important; height: 100vh !important; margin: 0 !important; max-width: none !important; max-height: none !important; object-fit: fill !important; z-index: 2147483647 !important; background: #000 !important; cursor: none !important; opacity: 1 !important; }
-        .module-loader-wrapper:not(:has(video)), header, footer, nav, .vjs-control-bar, .vjs-big-play-button, .vjs-title-bar, .vjs-poster, .vjs-loading-spinner, .vjs-text-track-display, .vjs-text-track-display-ttml, .vjs-modal-dialog, .tvProviderImage, #onetrust-consent-sdk {
-          opacity: 0 !important; pointer-events: none !important;
-        }
-      `;
-      (document.head || document.documentElement).appendChild(s);
+  // Capture #charon_channel=TOKEN before the SPA router strips the hash
+  try {
+    const hashMatch = location.hash.match(/charon_channel=([^&]+)/i);
+    if (hashMatch) {
+      sessionStorage.setItem('__charonUsaTarget', decodeURIComponent(hashMatch[1]));
     }
+  } catch {}
+
+  // Find the matching .epg-channel-feed-container row by aria-label prefix and click its first live program tile
+  const selectChannelFromGuide = () => {
+    let target = '';
+    try { target = sessionStorage.getItem('__charonUsaTarget') || ''; } catch {}
+    if (!target || window.__charonUsaChannelSelected === target) return false;
+
+    const rows = Array.from(document.querySelectorAll('.epg-channel-feed-container'));
+    if (rows.length === 0) return true; // Guide not hydrated yet
+
+    const prefix = target.trim().toLowerCase() + ' ';
+
+    for (const row of rows) {
+      const firstTile = row.querySelector('.epg-tile-container');
+      const info = firstTile?.querySelector('.tile-info') || row.querySelector('.tile-info');
+      const aria = (info?.getAttribute('aria-label') || '').trim().toLowerCase();
+
+      if (aria.startsWith(prefix)) {
+        window.__charonUsaChannelSelected = target;
+        window.__charonUsaSelectedAt = Date.now();
+        const clickTarget = firstTile?.querySelector('a, button') || info || firstTile;
+        if (clickTarget) clickTarget.click();
+        return true;
+      }
+    }
+
+    return true;
   };
 
   const findMainVideo = () =>
@@ -123,7 +143,10 @@
   };
 
   const checkPlayer = () => {
-    injectStaticCss();
+    if (selectChannelFromGuide()) return;
+
+    // Give the player a brief moment after clicking the EPG tile before interacting or lifting the curtain
+    if (window.__charonUsaSelectedAt && Date.now() - window.__charonUsaSelectedAt < 1200) return;
 
     const v = findMainVideo();
     if (!v || window.__charonUsaKicking) return;
@@ -163,8 +186,6 @@
     }
 
     // 4. Ongoing Time & Frame Progress Watchdog:
-    // Every 2 seconds, verify currentTime advanced by >= 0.1s AND decoded frames advanced.
-    // If frozen, click the LIVE button / seekToLiveEdge() to jump past the stuck SSAI segment.
     const time = v.currentTime;
     const frames = v.getVideoPlaybackQuality ? v.getVideoPlaybackQuality().totalVideoFrames : (v.webkitDecodedFrameCount || 0);
 
@@ -199,8 +220,9 @@
       }
     }
 
-    if (!v.__charonStyled) {
+    if (!v.__charonStyled && !v.paused && v.readyState >= 2 && v.videoWidth > 0 && v.currentTime > 0.2) {
       v.__charonStyled = true;
+      document.documentElement.classList.add('charon-playing');
       v.style.cssText = [
         'background: black !important',
         'cursor: none !important',
@@ -213,8 +235,9 @@
         'max-height: none !important',
         'max-width: none !important',
         'object-fit: fill !important',
+        'opacity: 1 !important',
         'position: fixed !important',
-        'z-index: 2147483647 !important'
+        'z-index: 2147483646 !important'
       ].join('; ');
     }
   };

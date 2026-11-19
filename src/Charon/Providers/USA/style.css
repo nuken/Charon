@@ -8,8 +8,27 @@ html, body {
   cursor: none !important;
 }
 
+/* Full-screen black curtain covering the guide & loader until playback starts */
+html::after {
+  content: "" !important;
+  position: fixed !important;
+  inset: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  background: #000 !important;
+  z-index: 2147483647 !important;
+  pointer-events: none !important;
+}
+
+html.charon-playing::after {
+  display: none !important;
+}
+
 *:has(video) {
   transform: none !important;
+  filter: none !important;
+  perspective: none !important;
+  will-change: auto !important;
   contain: none !important;
 }
 
@@ -24,7 +43,7 @@ video, video#epg-player_html5_api, .vjs-tech {
   max-width: none !important;
   max-height: none !important;
   object-fit: fill !important;
-  z-index: 2147483647 !important;
+  z-index: 2147483646 !important;
   background: #000 !important;
   cursor: none !important;
   opacity: 1 !important;

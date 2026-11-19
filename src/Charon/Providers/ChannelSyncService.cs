@@ -25,7 +25,8 @@ public class ChannelSyncService
          providerId.Contains("nbc", StringComparison.OrdinalIgnoreCase) ||
          providerId.Contains("abc", StringComparison.OrdinalIgnoreCase) ||
          providerId.Contains("cbs", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Contains("fox", StringComparison.OrdinalIgnoreCase));
+         providerId.Contains("fox", StringComparison.OrdinalIgnoreCase) ||
+         providerId.Contains("usa", StringComparison.OrdinalIgnoreCase));
 		 
     public static async Task<(List<ProviderChannel> Channels, int MatchedCount)> ScanAndMatchAsync(
         CharonConfig config,
@@ -98,6 +99,7 @@ public class ChannelSyncService
 		bool isAbc = provider.Manifest.Id.Contains("abc", StringComparison.OrdinalIgnoreCase);
 		bool isCbs = provider.Manifest.Id.Contains("cbs", StringComparison.OrdinalIgnoreCase);
 		bool isFox = provider.Manifest.Id.Contains("fox", StringComparison.OrdinalIgnoreCase);
+		bool isUsa = provider.Manifest.Id.Contains("usa", StringComparison.OrdinalIgnoreCase);
 		string targetUrl = isSpectrum
             ? "https://watch.spectrum.net/guide"
             : isXfinity
@@ -120,6 +122,8 @@ public class ChannelSyncService
             ? "https://www.cbs.com/live-tv/stream/tveverywhere/"
 			: isFox
             ? "https://www.fox.com/live/channels"
+			: isUsa
+            ? "https://www.usanetwork.com/live"
             : "https://tv.youtube.com/live";
 
         int posX = config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : -3200;
@@ -421,6 +425,32 @@ public class ChannelSyncService
                 {
                     statusCallback($"Step 1/2: Scraping FOX One live channels & local affiliate via fox.com...");
                     string? res = await EvaluateJsStringAsync(ws, 1, foxJs);
+
+                    if (!string.IsNullOrWhiteSpace(res))
+                    {
+                        if (res.StartsWith("{\"status\":", StringComparison.Ordinal))
+                        {
+                            log($"[Sync] {res}");
+                        }
+                        else if (res.StartsWith("[", StringComparison.Ordinal) && res != "[]")
+                        {
+                            var parsed = ProviderManager.ParseChannelsJson(res);
+                            if (parsed.Count > 0) return parsed;
+                        }
+                    }
+                    await Task.Delay(1000);
+                }
+                return [];
+            }
+			else if (isUsa)
+            {
+                string usaJs = GetUsaScraperJs();
+                var deadline = DateTime.UtcNow.AddSeconds(25);
+
+                while (DateTime.UtcNow < deadline)
+                {
+                    statusCallback($"Step 1/2: Scraping USA Network live channels (East/West) via usanetwork.com...");
+                    string? res = await EvaluateJsStringAsync(ws, 1, usaJs);
 
                     if (!string.IsNullOrWhiteSpace(res))
                     {
@@ -1546,6 +1576,68 @@ public class ChannelSyncService
         })()
         """;
 		
+		private static string GetUsaScraperJs() => """
+        (() => {
+          if (!location.hostname.includes('usanetwork.com')) {
+            return JSON.stringify({ status: 'waiting_for_page', url: location.href });
+          }
+
+          const rows = Array.from(document.querySelectorAll('.epg-channel-feed-container'));
+          if (rows.length === 0) {
+            return JSON.stringify({ status: 'waiting_for_usa_epg_rows', url: location.href });
+          }
+
+          const displayNames = {
+            'usa-east':    'USA (East)',
+            'usa-west':    'USA (West)',
+            'e!-east':     'E! (East)',
+            'e!-west':     'E! (West)',
+            'syfy-east':   'SYFY (East)',
+            'syfy-west':   'SYFY (West)',
+            'oxygen-east': 'Oxygen (East)',
+            'oxygen-west': 'Oxygen (West)',
+            'cnbc':        'CNBC',
+            'msnow':       'MS NOW',
+            'golf':        'Golf Channel'
+          };
+
+          const results = [];
+          const seen = new Set();
+          let chNum = 300;
+
+          for (const row of rows) {
+            const firstTile = row.querySelector('.epg-tile-container');
+            const info = firstTile?.querySelector('.tile-info') || row.querySelector('.tile-info');
+            const aria = (info?.getAttribute('aria-label') || '').trim();
+            if (!aria) continue;
+
+            // First token is the exact feed prefix (e.g. "USA-East", "E!-West", "MSNOW", "Golf")
+            const token = aria.split(/\s+/)[0];
+            const key = token.toLowerCase();
+            if (!token || seen.has(key)) continue;
+            seen.add(key);
+
+            const name = displayNames[key] || token.replace(/-(East|West)$/i, ' ($1)');
+            const slug = key.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+            results.push({
+              Id: `usa-${slug}`,
+              Name: name,
+              ChannelNumber: String(chNum++),
+              StationId: '',
+              Url: `https://www.usanetwork.com/live#charon_channel=${encodeURIComponent(token)}`,
+              IsHidden: false
+            });
+          }
+
+          if (results.length === 0) {
+            return JSON.stringify({ status: 'waiting_for_usa_epg_rows', url: location.href });
+          }
+
+          return JSON.stringify(results);
+        })()
+        """;
+		
     // Direct, verified Gracenote TMS StationId table (East/Central/Mountain ID, Pacific ID)
     // Bypasses fuzzy text search completely for core national networks!
     private static readonly Dictionary<string, (string EastId, string WestId)> VerifiedGracenoteStationIds =
@@ -1567,8 +1659,8 @@ public class ChannelSyncService
         { "Public Broadcasting System Kids", ("101364", "101364") },
 
         // General Entertainment
-        { "E!",                         ("61812",  "94563") },
-        { "E! Entertainment Television",("61812",  "94563") },
+        { "E!",                         ("61812",  "105773") },
+        { "E! Entertainment Television",("61812",  "105773") },
         { "Freeform",                   ("59615",  "59616") },
         { "USA",                        ("58452",  "74030") },
         { "USA Network",                ("58452",  "74030") },
