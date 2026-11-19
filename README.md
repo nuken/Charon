@@ -60,6 +60,7 @@ Charon supports six major streaming providers out of the box:
     - **NBC**
     - **ABC / FX / NatGeo**
 	- **CBS**
+	- **Fox One**
 
 ---
 
