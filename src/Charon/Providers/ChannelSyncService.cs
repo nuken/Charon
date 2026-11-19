@@ -23,7 +23,8 @@ public class ChannelSyncService
 		 providerId.Contains("fubo", StringComparison.OrdinalIgnoreCase) ||
 		 providerId.Contains("sling", StringComparison.OrdinalIgnoreCase) ||
          providerId.Contains("nbc", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Contains("abc", StringComparison.OrdinalIgnoreCase));
+         providerId.Contains("abc", StringComparison.OrdinalIgnoreCase) ||
+         providerId.Contains("cbs", StringComparison.OrdinalIgnoreCase));
 		 
     public static async Task<(List<ProviderChannel> Channels, int MatchedCount)> ScanAndMatchAsync(
         CharonConfig config,
@@ -94,6 +95,7 @@ public class ChannelSyncService
 		bool isHulu = provider.Manifest.Id.Contains("hulu", StringComparison.OrdinalIgnoreCase);
 		bool isFubo = provider.Manifest.Id.Contains("fubo", StringComparison.OrdinalIgnoreCase);
 		bool isAbc = provider.Manifest.Id.Contains("abc", StringComparison.OrdinalIgnoreCase);
+		bool isCbs = provider.Manifest.Id.Contains("cbs", StringComparison.OrdinalIgnoreCase);
 		string targetUrl = isSpectrum
             ? "https://watch.spectrum.net/guide"
             : isXfinity
@@ -112,6 +114,8 @@ public class ChannelSyncService
             ? "https://www.fubo.tv/p/home"
 			: isAbc
             ? "https://abc.com/watch-live"
+			: isCbs
+            ? "https://www.cbs.com/live-tv/stream/tveverywhere/"
             : "https://tv.youtube.com/live";
 
         int posX = config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : -3200;
@@ -361,6 +365,32 @@ public class ChannelSyncService
                 {
                     statusCallback($"Step 1/2: Resolving local ABC affiliate & lineup via abc.com/watch-live...");
                     string? res = await EvaluateJsStringAsync(ws, 1, abcJs);
+
+                    if (!string.IsNullOrWhiteSpace(res))
+                    {
+                        if (res.StartsWith("{\"status\":", StringComparison.Ordinal))
+                        {
+                            log($"[Sync] {res}");
+                        }
+                        else if (res.StartsWith("[", StringComparison.Ordinal) && res != "[]")
+                        {
+                            var parsed = ProviderManager.ParseChannelsJson(res);
+                            if (parsed.Count > 0) return parsed;
+                        }
+                    }
+                    await Task.Delay(1000);
+                }
+                return [];
+            }
+			else if (isCbs)
+            {
+                string cbsJs = GetCbsScraperJs();
+                var deadline = DateTime.UtcNow.AddSeconds(25);
+
+                while (DateTime.UtcNow < deadline)
+                {
+                    statusCallback($"Step 1/2: Resolving local CBS affiliate via cbs.com...");
+                    string? res = await EvaluateJsStringAsync(ws, 1, cbsJs);
 
                     if (!string.IsNullOrWhiteSpace(res))
                     {
@@ -1295,6 +1325,91 @@ public class ChannelSyncService
               StationId: "",
               Url: `https://abc.com/watch-live/${uuid}`,
               IsHidden: true
+            });
+          }
+
+          return JSON.stringify(results);
+        })()
+        """;
+		
+		private static string GetCbsScraperJs() => """
+        (() => {
+          if (!location.hostname.includes('cbs.com')) {
+            return JSON.stringify({ status: 'waiting_for_page', url: location.href });
+          }
+
+          // 1. Actively click CBS's "Start Watching" splash screen button if present
+          const buttons = Array.from(document.querySelectorAll('button, a, div[role="button"], span, .button'));
+          const startBtn = buttons.find(el => {
+            const t = (el.textContent || '').trim().toLowerCase();
+            return t === 'start watching' || t === 'start watching »' || el.getAttribute('aria-label')?.toLowerCase() === 'start watching';
+          });
+
+          if (startBtn && Date.now() - (window.__charonCbsClickAt || 0) > 2000) {
+            window.__charonCbsClickAt = Date.now();
+            startBtn.click();
+            return JSON.stringify({ status: 'clicked_start_watching_button', url: location.href });
+          }
+
+          const results = [
+            { Id: "cbs-news-247", Name: "CBS News 24/7", ChannelNumber: "270", StationId: "", Url: "https://www.cbs.com/live-tv/stream/cbs-news/", IsHidden: false },
+            { Id: "cbs-sports-hq", Name: "CBS Sports HQ", ChannelNumber: "271", StationId: "", Url: "https://www.cbs.com/live-tv/stream/sports/", IsHidden: true },
+            { Id: "cbs-sports-golazo", Name: "CBS Sports Golazo Network", ChannelNumber: "272", StationId: "", Url: "https://www.cbs.com/live-tv/stream/golazo/", IsHidden: true }
+          ];
+
+          // 2. Hook fetch / XHR to catch the Paramount stream URL containing the call sign (e.g. /WBTV/live/)
+          if (!window.__charonCbsHooked) {
+            window.__charonCbsHooked = true;
+            const checkUrl = (u) => {
+              const m = String(u || '').match(/\/([WK][A-Z]{2,3})\/live\//i);
+              if (m) window.__charonCbsCallSign = m[1].toUpperCase();
+            };
+            
+            const origFetch = window.fetch;
+            window.fetch = function (input, init) {
+              checkUrl(typeof input === 'string' ? input : input?.url);
+              return origFetch.apply(this, arguments);
+            };
+
+            const origOpen = XMLHttpRequest.prototype.open;
+            XMLHttpRequest.prototype.open = function (method, url) {
+              checkUrl(url);
+              return origOpen.apply(this, arguments);
+            };
+          }
+
+          let callSign = window.__charonCbsCallSign || '';
+
+          // 3. Check performance resource entries as fallback
+          if (!callSign) {
+            for (const r of performance.getEntriesByType('resource')) {
+              const m = r.name.match(/\/([WK][A-Z]{2,3})\/live\//i);
+              if (m) {
+                callSign = m[1].toUpperCase();
+                window.__charonCbsCallSign = callSign;
+                break;
+              }
+            }
+          }
+
+          // 4. Check global CBS Registry or script data if available
+          if (!callSign && window.CBS && window.CBS.Registry) {
+            // Check if callsign is embedded anywhere in global state
+          }
+
+          window.__charonCbsAttempts = (window.__charonCbsAttempts || 0) + 1;
+          if (!callSign && window.__charonCbsAttempts <= 25) {
+            return JSON.stringify({ status: 'waiting_for_cbs_player_to_load_station', attempts: window.__charonCbsAttempts, url: location.href });
+          }
+
+          if (callSign && callSign !== 'CBS') {
+            results.unshift({
+              Id: `cbs-local-${callSign.toLowerCase()}`,
+              Name: callSign,
+              ChannelNumber: "269",
+              StationId: "", // Left blank so MatchGracenoteStationsAsync resolves WBTV via Channels DVR!
+              Url: "https://www.cbs.com/live-tv/stream/tveverywhere/",
+              IsHidden: false
             });
           }
 

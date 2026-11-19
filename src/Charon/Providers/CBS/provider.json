@@ -1,0 +1,8 @@
+{
+  "id": "cbs",
+  "name": "CBS (TVE)",
+  "groupTitle": "CBS (TVE)",
+  "enabled": true,
+  "loginUrl": "https://www.cbs.com/live-tv/stream/tveverywhere/",
+  "tuneScriptDelayMs": 1500
+}
