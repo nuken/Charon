@@ -1689,6 +1689,7 @@ public class ChannelSyncService
         { "Fox News Channel",           ("60179",  "60179") },
         { "FOX Business",               ("58718",  "58718") },
         { "Fox Business Network",       ("58718",  "58718") },
+		{ "LiveNOW from FOX",          ("119219",  "119219") },
         { "MSNBC",                      ("64241",  "64241") },
         { "MS NOW",                     ("64241",  "64241") },
         { "CNBC",                       ("58780",  "58780") },
@@ -1727,6 +1728,7 @@ public class ChannelSyncService
         { "National Hockey League Network", ("58690", "58690") },
         { "Golf Channel",               ("61854",  "61854") },
         { "Tennis Channel",             ("60316",  "60316") },
+		{ "FOX Deportes",               ("72189",   "72189") },
 		
 		// Premium (Starz family, as titled in the Sling guide; East and West are separate channels there)
         { "STARZ",                      ("34941",  "34941") },
@@ -1751,6 +1753,7 @@ public class ChannelSyncService
         // Entertainment Studios & Shopping
         { "Comedy.TV",                  ("82470",  "82470") },
         { "JusticeCentral.TV",          ("78850",  "78850") },
+		{ "Justice Central",            ("78850",  "78850") },
         { "Recipe.TV",                  ("71769",  "71769") },
         { "Cars.TV",                    ("69062",  "69062") },
         { "theGRIO",                    ("121310", "121310") },
@@ -1758,6 +1761,9 @@ public class ChannelSyncService
 		{ "AWE",                        ("59436",  "59436") },
         { "HBCU GO",                    ("125163", "125163") },
         { "HSN",                        ("62077",  "62077") },
+		{ "FOX Soul",                  ("119212",  "119212") },
+		{ "TMZ",                       ("149408",  "149408") },
+		
 		 // Xfinity premium callSigns (matched against the stream URL; callSigns keep legacy names, e.g. HBO2H = HBO Hits)
         { "HBOHD",                      ("19548",  "19548") },
         { "HBO-W",                      ("10244",  "10244") },
@@ -1806,14 +1812,11 @@ public class ChannelSyncService
                 updatedCount++;
                 continue;
             }
-			
-			if (ch.IsHidden)
-                continue;
 
             string rawName = ch.Name.Trim();
             TmsStation? match = null;
-			
-			 // Hulu titles separate feeds "TBS (East)" / "TBS (West)": look up the base name and take that feed's ID
+
+            // Hulu titles separate feeds "TBS (East)" / "TBS (West)": look up the base name and take that feed's ID
             string lookupName = rawName;
             bool useWestFeed = preferPacific;
             var feedMatch = System.Text.RegularExpressions.Regex.Match(
@@ -1827,7 +1830,7 @@ public class ChannelSyncService
             var xfMatch = System.Text.RegularExpressions.Regex.Match(ch.Url ?? "", @"/stream/live/([^/]+)/\d+/");
             string? urlCallSign = xfMatch.Success ? Uri.UnescapeDataString(xfMatch.Groups[1].Value) : null;
 
-            // 1. Check Verified National Network Gracenote StationId table first (by display name, then by Xfinity URL callSign)
+            // 1. Check Verified National Network Gracenote StationId table first (runs even if hidden)
             if (VerifiedGracenoteStationIds.TryGetValue(lookupName, out var verifiedIds) ||
                 (!string.IsNullOrWhiteSpace(urlCallSign) && VerifiedGracenoteStationIds.TryGetValue(urlCallSign, out verifiedIds)))
             {
@@ -1836,6 +1839,10 @@ public class ChannelSyncService
                 log($"[Gracenote] [OK] {ch.Name} -> Verified US HD [StationId: {ch.StationId}]");
                 continue;
             }
+
+            // Skip remaining hidden channels that weren't in VerifiedGracenoteStationIds
+            if (ch.IsHidden)
+                continue;
 
             // 2. Skip vague local affiliate names that lack real FCC call letters (e.g. "FOX 46", "CW Charlotte", "TV64", "PBS NC", "SCETV")
             

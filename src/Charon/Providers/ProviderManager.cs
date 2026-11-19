@@ -2796,7 +2796,7 @@ public class ProviderManager
                       v.volume = 1.0;
                     }
 
-                    if (!v.__charonStyled && !v.paused && v.readyState >= 2 && v.videoWidth > 0 && v.currentTime > 0.2) {
+                    if (!v.__charonStyled && !v.paused && v.readyState >= 2 && v.videoWidth > 0 && v.currentTime > 1.0) {
                       v.__charonStyled = true;
                       document.documentElement.classList.add('charon-playing');
                       v.style.cssText = [
