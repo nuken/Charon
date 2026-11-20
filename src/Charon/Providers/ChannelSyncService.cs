@@ -26,7 +26,8 @@ public class ChannelSyncService
          providerId.Contains("abc", StringComparison.OrdinalIgnoreCase) ||
          providerId.Contains("cbs", StringComparison.OrdinalIgnoreCase) ||
          providerId.Contains("fox", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Contains("usa", StringComparison.OrdinalIgnoreCase));
+         providerId.Contains("usa", StringComparison.OrdinalIgnoreCase) ||
+         providerId.Contains("espn", StringComparison.OrdinalIgnoreCase));
 		 
     public static async Task<(List<ProviderChannel> Channels, int MatchedCount)> ScanAndMatchAsync(
         CharonConfig config,
@@ -100,6 +101,7 @@ public class ChannelSyncService
 		bool isCbs = provider.Manifest.Id.Contains("cbs", StringComparison.OrdinalIgnoreCase);
 		bool isFox = provider.Manifest.Id.Contains("fox", StringComparison.OrdinalIgnoreCase);
 		bool isUsa = provider.Manifest.Id.Contains("usa", StringComparison.OrdinalIgnoreCase);
+		bool isEspn = provider.Manifest.Id.Contains("espn", StringComparison.OrdinalIgnoreCase);
 		string targetUrl = isSpectrum
             ? "https://watch.spectrum.net/guide"
             : isXfinity
@@ -124,6 +126,8 @@ public class ChannelSyncService
             ? "https://www.fox.com/live/channels"
 			: isUsa
             ? "https://www.usanetwork.com/live"
+			: isEspn
+            ? "https://www.espn.com/watch/"
             : "https://tv.youtube.com/live";
 
         int posX = config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : -3200;
@@ -451,6 +455,32 @@ public class ChannelSyncService
                 {
                     statusCallback($"Step 1/2: Scraping USA Network live channels (East/West) via usanetwork.com...");
                     string? res = await EvaluateJsStringAsync(ws, 1, usaJs);
+
+                    if (!string.IsNullOrWhiteSpace(res))
+                    {
+                        if (res.StartsWith("{\"status\":", StringComparison.Ordinal))
+                        {
+                            log($"[Sync] {res}");
+                        }
+                        else if (res.StartsWith("[", StringComparison.Ordinal) && res != "[]")
+                        {
+                            var parsed = ProviderManager.ParseChannelsJson(res);
+                            if (parsed.Count > 0) return parsed;
+                        }
+                    }
+                    await Task.Delay(1000);
+                }
+                return [];
+            }
+			else if (isEspn)
+            {
+                string espnJs = GetEspnScraperJs();
+                var deadline = DateTime.UtcNow.AddSeconds(30);
+
+                while (DateTime.UtcNow < deadline)
+                {
+                    statusCallback($"Step 1/2: Scraping ESPN Watch live channels via espn.com/watch...");
+                    string? res = await EvaluateJsStringAsync(ws, 1, espnJs);
 
                     if (!string.IsNullOrWhiteSpace(res))
                     {
@@ -1632,6 +1662,64 @@ public class ChannelSyncService
 
           if (results.length === 0) {
             return JSON.stringify({ status: 'waiting_for_usa_epg_rows', url: location.href });
+          }
+
+          return JSON.stringify(results);
+        })()
+        """;
+		
+		private static string GetEspnScraperJs() => """
+        (async () => {
+          if (!location.hostname.includes('espn.com')) {
+            return JSON.stringify({ status: 'waiting_for_page', url: location.href });
+          }
+
+          // Scroll down to trigger lazy-loading of the Channels row near the footer
+          let links = Array.from(document.querySelectorAll('a[data-track-nav_item*="|channels|"]'));
+          if (links.length === 0) {
+            window.scrollTo(0, document.body.scrollHeight);
+            await new Promise(r => setTimeout(r, 600));
+            links = Array.from(document.querySelectorAll('a[data-track-nav_item*="|channels|"]'));
+          }
+
+          if (links.length === 0) {
+            return JSON.stringify({ status: 'waiting_for_espn_channels_row', url: location.href });
+          }
+
+          const renameMap = {
+            'ACCN': 'ACC Network'
+          };
+
+          // Keep linear 24/7 networks visible by default; hide event hubs / conference / plus shelves
+          const coreLinear = new Set([
+            'ESPN', 'ESPN2', 'ESPNU', 'ESPNews', 'SEC Network', 'ACC Network', 'NFL Network', 'ESPN Deportes'
+          ]);
+
+          const results = [];
+          const seen = new Set();
+          let chNum = 320;
+
+          for (const a of links) {
+            const rawTitle = (a.getAttribute('data-track-title') || a.getAttribute('aria-label') || '').trim();
+            const href = (a.getAttribute('href') || '').trim();
+            if (!rawTitle || !href) continue;
+
+            const name = renameMap[rawTitle] || rawTitle;
+            const key = name.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+
+            const fullUrl = href.startsWith('http') ? href : `https://www.espn.com${href}`;
+            const slug = key.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+
+            results.push({
+              Id: `espn-${slug}`,
+              Name: name,
+              ChannelNumber: String(chNum++),
+              StationId: '',
+              Url: fullUrl,
+              IsHidden: !coreLinear.has(name)
+            });
           }
 
           return JSON.stringify(results);

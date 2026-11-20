@@ -1,0 +1,433 @@
+using System.Diagnostics;
+using System.IO;
+using System.Net.Http;
+using System.Net.Sockets;
+using System.Net.WebSockets;
+using System.Text;
+using System.Text.Json;
+using Charon.Config;
+using Charon.Tuner;
+
+namespace Charon.Providers;
+
+public sealed class SessionHealthService : IAsyncDisposable
+{
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
+
+    private readonly CharonConfig _config;
+    private readonly ProviderManager _providers;
+    private readonly ChromeTuner _tuner;
+    private readonly Func<bool> _isServerIdle;
+    private readonly Action<string> _log;
+    private readonly Action<string, string, bool> _notifyUser;
+
+    private readonly SemaphoreSlim _runLock = new(1, 1);
+    private CancellationTokenSource? _cts;
+    private Task? _loopTask;
+    private DateTime _lastCompletedUtc = DateTime.MinValue;
+
+    public SessionHealthService(
+        CharonConfig config,
+        ProviderManager providers,
+        ChromeTuner tuner,
+        Func<bool> isServerIdle,
+        Action<string> log,
+        Action<string, string, bool> notifyUser)
+    {
+        _config = config;
+        _providers = providers;
+        _tuner = tuner;
+        _isServerIdle = isServerIdle;
+        _log = log;
+        _notifyUser = notifyUser;
+    }
+
+    public void Start()
+    {
+        if (_cts is not null) return;
+        _cts = new CancellationTokenSource();
+        _loopTask = Task.Run(() => RunLoopAsync(_cts.Token));
+    }
+
+    public Task RunCheckNowAsync() => RunPassAsync(force: true, _cts?.Token ?? CancellationToken.None);
+
+    private async Task RunLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Wait 5 minutes after startup before checking if a pass is due
+            await Task.Delay(TimeSpan.FromMinutes(5), ct);
+
+            using var timer = new PeriodicTimer(TimeSpan.FromMinutes(30));
+            do
+            {
+                if (!_config.EnableSessionHealthCheck)
+                    continue;
+
+                var interval = TimeSpan.FromHours(Math.Clamp(_config.SessionCheckIntervalHours, 1, 168));
+                if (DateTime.UtcNow - _lastCompletedUtc >= interval)
+                {
+                    await RunPassAsync(force: false, ct);
+                }
+            }
+            while (await timer.WaitForNextTickAsync(ct));
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task RunPassAsync(bool force, CancellationToken ct)
+    {
+        if (!await _runLock.WaitAsync(0, ct))
+        {
+            if (force) _log("[Health] A session health check is already running.");
+            return;
+        }
+
+        try
+        {
+            if (!_isServerIdle())
+            {
+                _log("[Health] Skipping session keep-alive pass because a tuner is currently active (will retry when idle).");
+                return;
+            }
+
+            // Only rotate through enabled providers that have at least one visible (non-hidden) channel
+            var activeProviders = _providers.Providers
+                .Where(p => p.Manifest.Enabled &&
+                            !string.IsNullOrWhiteSpace(p.Manifest.LoginUrl) &&
+                            p.Channels.Any(c => !c.IsHidden))
+                .ToList();
+
+            if (activeProviders.Count == 0)
+            {
+                if (force) _log("[Health] No active providers with visible channels to check.");
+                _lastCompletedUtc = DateTime.UtcNow;
+                return;
+            }
+
+            _log($"[Health] Starting idle keep-alive & session check for {activeProviders.Count} active provider(s)...");
+
+            var expiredNames = new List<string>();
+            var expiringNames = new List<string>();
+
+            string tuner1Profile = _tuner.GetTunerProfilePath(1);
+            int cdpPort = FindFreeLoopbackPort(9430);
+            int posX = _config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : -3200;
+            int posY = _config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : 0;
+
+            string args = string.Join(" ",
+            [
+                $"--user-data-dir=\"{tuner1Profile}\"",
+                $"--remote-debugging-port={cdpPort}",
+                "--remote-allow-origins=*",
+                "--disable-extensions",
+                $"--window-position={posX},{posY}",
+                "--window-size=1280,800",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-blink-features=AutomationControlled",
+                "--mute-audio",
+                "\"about:blank\""
+            ]);
+
+            Process? chromeProc = null;
+            string? wsUrl = null;
+
+            try
+            {
+                chromeProc = Process.Start(new ProcessStartInfo
+                {
+                    FileName = _config.ResolvedChromePath,
+                    Arguments = args,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+
+                wsUrl = await WaitForPageWebSocketUrlAsync(cdpPort, TimeSpan.FromSeconds(15), ct);
+                if (string.IsNullOrWhiteSpace(wsUrl))
+                {
+                    _log("[Health] Could not attach to Chrome (Tuner_1 may be open in a Login window). Deferring check.");
+                    return;
+                }
+
+                using var ws = new ClientWebSocket();
+                await ws.ConnectAsync(new Uri(wsUrl), ct);
+
+                int cmdId = 1;
+                await SendCdpCommandAsync(ws, cmdId++, "Page.enable", new { }, ct);
+
+                foreach (var provider in activeProviders)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    // Abort immediately if a client starts streaming while we're rotating
+                    if (!_isServerIdle())
+                    {
+                        _log("[Health] A tuner became active mid-check — stopping keep-alive pass immediately.");
+                        return;
+                    }
+
+                    await SendCdpCommandAsync(ws, cmdId++, "Page.navigate", new { url = provider.Manifest.LoginUrl }, ct);
+                    await Task.Delay(TimeSpan.FromSeconds(6), ct);
+
+                    string? json = await EvaluateJsStringAsync(ws, cmdId++, GetHealthCheckJs(provider.Manifest.Id), ct);
+                    ParseHealthResult(provider, json, expiredNames, expiringNames);
+                }
+
+                _lastCompletedUtc = DateTime.UtcNow;
+            }
+            finally
+            {
+                if (wsUrl is not null)
+                {
+                    try
+                    {
+                        using var closeWs = new ClientWebSocket();
+                        await closeWs.ConnectAsync(new Uri(wsUrl), CancellationToken.None);
+                        await SendCdpCommandAsync(closeWs, 9999, "Browser.close", new { }, CancellationToken.None);
+                        await Task.Delay(300, CancellationToken.None);
+                    }
+                    catch { }
+                }
+
+                if (chromeProc is { HasExited: false })
+                {
+                    try { chromeProc.Kill(entireProcessTree: true); } catch { }
+                }
+            }
+
+            // Push refreshed cookies/tokens from Tuner_1 out to Tuners 2–4
+            if (_isServerIdle())
+            {
+                _tuner.SyncMasterAuthToAllTuners(_log);
+            }
+
+            // Fire Windows tray notification if any provider needs attention
+            if (expiredNames.Count > 0 || expiringNames.Count > 0)
+            {
+                var parts = new List<string>();
+                if (expiredNames.Count > 0)
+                    parts.Add($"Re-login needed: {string.Join(", ", expiredNames)}");
+                if (expiringNames.Count > 0)
+                    parts.Add($"Expiring soon: {string.Join(", ", expiringNames)}");
+
+                string message = string.Join(" | ", parts);
+                _log($"[Health] ALERT: {message}");
+                _notifyUser("Charon — Provider Login Attention", message, true);
+            }
+            else if (force)
+            {
+                _notifyUser("Charon — All Sessions Healthy",
+                    $"Verified {activeProviders.Count} active provider(s) and synced Tuners 2–4.", false);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            _log($"[Health] Error during session check: {ex.Message}");
+        }
+        finally
+        {
+            _runLock.Release();
+        }
+    }
+
+    private void ParseHealthResult(
+        LoadedProvider provider,
+        string? json,
+        List<string> expiredNames,
+        List<string> expiringNames)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            _log($"[Health] [??] {provider.Manifest.Name}: No response from page check.");
+            return;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            string state = doc.RootElement.TryGetProperty("state", out var s) ? s.GetString() ?? "ok" : "ok";
+            string detail = doc.RootElement.TryGetProperty("detail", out var d) ? d.GetString() ?? "" : "";
+
+            switch (state)
+            {
+                case "expired":
+                    expiredNames.Add(provider.Manifest.Name);
+                    _log($"[Health] [EXPIRED] {provider.Manifest.Name}: {detail}");
+                    break;
+                case "expiring":
+                    expiringNames.Add(provider.Manifest.Name);
+                    _log($"[Health] [EXPIRING] {provider.Manifest.Name}: {detail}");
+                    break;
+                default:
+                    _log($"[Health] [OK] {provider.Manifest.Name}: Session active ({detail})");
+                    break;
+            }
+        }
+        catch
+        {
+            _log($"[Health] [OK] {provider.Manifest.Name}: Visited keep-alive page.");
+        }
+    }
+
+    private static string GetHealthCheckJs(string providerId) => $$"""
+        (() => {
+          const id = {{JsonSerializer.Serialize(providerId.ToLowerInvariant())}};
+          const href = location.href;
+          const path = location.pathname.toLowerCase();
+
+          // 1. Spectrum exposes oauth_token + xoauth_token_expiration in localStorage
+          if (id.includes('spectrum')) {
+            const token = (localStorage.getItem('oauth_token') || '').replace(/^["']|["']$/g, '');
+            if (!token) return JSON.stringify({ state: 'expired', detail: 'No oauth_token in localStorage' });
+            const expRaw = (localStorage.getItem('xoauth_token_expiration') || '').replace(/^["']|["']$/g, '');
+            const expMs = Number(expRaw);
+            if (expMs > 0) {
+              const hoursLeft = (expMs - Date.now()) / 3600000;
+              if (hoursLeft <= 0) return JSON.stringify({ state: 'expired', detail: 'Spectrum token expired' });
+              if (hoursLeft <= 3) return JSON.stringify({ state: 'expiring', detail: `${hoursLeft.toFixed(1)}h remaining` });
+              return JSON.stringify({ state: 'ok', detail: `${hoursLeft.toFixed(1)}h remaining` });
+            }
+            return JSON.stringify({ state: 'ok', detail: 'oauth_token present' });
+          }
+
+          // 2. CNN: ignore regular CNN account "Sign in" and only flag the TVE "Have a TV Provider? ... Connect now" prompt
+          if (id.includes('cnn')) {
+            const bodyText = document.body?.innerText || '';
+            if (/have a tv provider\?/i.test(bodyText) && /connect now/i.test(bodyText)) {
+              return JSON.stringify({ state: 'expired', detail: 'Visible "Have a TV Provider? Connect now" prompt' });
+            }
+            return JSON.stringify({ state: 'ok', detail: href });
+          }
+
+          // 3. Common redirect-to-login paths across YTTV, Hulu, Fubo, Sling, Philo, TVE sites
+          if (/\/(welcome|login|signin|sign-in|signup|auth|mvpd|activate)\b/i.test(path) ||
+              /accounts\.google\.com|login\.|auth\./i.test(location.hostname)) {
+            return JSON.stringify({ state: 'expired', detail: `Redirected to ${location.hostname}${path}` });
+          }
+
+          // 4. Check for prominent "Sign In" / "Link TV Provider" buttons in main content (ignoring footers/nav)
+          const hasVideo = document.querySelectorAll('video').length > 0;
+          if (!hasVideo) {
+            const signInBtn = Array.from(document.querySelectorAll('a, button')).find(el => {
+              if (el.closest('footer, [class*="footer" i], nav')) return false;
+              const t = (el.textContent || '').trim();
+              return /^(sign in|log in|link tv provider|connect tv provider|choose tv provider)$/i.test(t) &&
+                     el.getBoundingClientRect().width > 0;
+            });
+            if (signInBtn) {
+              return JSON.stringify({ state: 'expired', detail: `Visible "${signInBtn.textContent.trim()}" prompt` });
+            }
+          }
+
+          return JSON.stringify({ state: 'ok', detail: href });
+        })()
+        """;
+
+    private static int FindFreeLoopbackPort(int startPort)
+    {
+        for (int p = startPort; p < startPort + 100; p++)
+        {
+            try
+            {
+                using var l = new TcpListener(System.Net.IPAddress.Loopback, p);
+                l.Start();
+                l.Stop();
+                return p;
+            }
+            catch { }
+        }
+        return startPort;
+    }
+
+    private static async Task<string?> WaitForPageWebSocketUrlAsync(int port, TimeSpan timeout, CancellationToken ct)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                string json = await Http.GetStringAsync($"http://127.0.0.1:{port}/json", ct);
+                using var doc = JsonDocument.Parse(json);
+                foreach (var el in doc.RootElement.EnumerateArray())
+                {
+                    string type = el.TryGetProperty("type", out var t) ? t.GetString() ?? "" : "";
+                    string url = el.TryGetProperty("url", out var u) ? u.GetString() ?? "" : "";
+                    if (type == "page" && !url.StartsWith("chrome-extension://", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (el.TryGetProperty("webSocketDebuggerUrl", out var wsProp))
+                            return wsProp.GetString();
+                    }
+                }
+            }
+            catch { }
+            await Task.Delay(300, ct);
+        }
+        return null;
+    }
+
+    private static async Task<string?> EvaluateJsStringAsync(ClientWebSocket ws, int id, string expression, CancellationToken ct)
+    {
+        await SendCdpCommandAsync(ws, id, "Runtime.evaluate", new
+        {
+            expression,
+            returnByValue = true,
+            awaitPromise = true
+        }, ct);
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(8));
+
+        var buffer = new byte[65536];
+        using var ms = new MemoryStream();
+
+        while (ws.State == WebSocketState.Open)
+        {
+            var res = await ws.ReceiveAsync(buffer, timeoutCts.Token);
+            ms.Write(buffer, 0, res.Count);
+            if (res.EndOfMessage)
+            {
+                string msg = Encoding.UTF8.GetString(ms.ToArray());
+                ms.SetLength(0);
+
+                using var doc = JsonDocument.Parse(msg);
+                if (doc.RootElement.TryGetProperty("id", out var msgId) && msgId.GetInt32() == id)
+                {
+                    if (doc.RootElement.TryGetProperty("result", out var resultEl) &&
+                        resultEl.TryGetProperty("result", out var innerResult) &&
+                        innerResult.TryGetProperty("value", out var valEl) &&
+                        valEl.ValueKind == JsonValueKind.String)
+                    {
+                        return valEl.GetString();
+                    }
+                    return null;
+                }
+            }
+        }
+        return null;
+    }
+
+    private static async Task SendCdpCommandAsync(ClientWebSocket ws, int id, string method, object parameters, CancellationToken ct)
+    {
+        string payload = JsonSerializer.Serialize(new { id, method, @params = parameters });
+        byte[] bytes = Encoding.UTF8.GetBytes(payload);
+        await ws.SendAsync(bytes, WebSocketMessageType.Text, true, ct);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_cts is not null)
+        {
+            await _cts.CancelAsync();
+            if (_loopTask is not null)
+            {
+                try { await _loopTask; } catch { }
+            }
+            _cts.Dispose();
+            _cts = null;
+        }
+        _runLock.Dispose();
+    }
+}
