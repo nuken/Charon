@@ -30,6 +30,8 @@ public class CharonConfig
     public WindowPlacementMode WindowPlacement { get; set; } = WindowPlacementMode.AutoOffScreen;
     public int CustomX { get; set; } = -3200;
     public int CustomY { get; set; } = 0;
+	public bool EnableSessionHealthCheck { get; set; } = true;
+    public int SessionCheckIntervalHours { get; set; } = 12;
 
     [JsonIgnore]
     public string ResolvedLanIp { get; private set; } = "127.0.0.1";

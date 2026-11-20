@@ -25,6 +25,7 @@ public partial class MainWindow : Window
     private readonly ProviderManager _providers;
     private readonly ChromeTuner _tuner;
     private readonly CharonServer _server;
+	private readonly SessionHealthService _healthService;
     private readonly bool _isInitializing = true;
     private readonly ObservableCollection<ProviderChannel> _editableChannels = [];
     private static readonly HttpClient UpdateHttp = new() { Timeout = TimeSpan.FromSeconds(8) };
@@ -51,6 +52,14 @@ public partial class MainWindow : Window
         _providers = new ProviderManager();
         _tuner = new ChromeTuner(_config);
         _server = new CharonServer(_config, _providers, _tuner, AppendLog);
+		_healthService = new SessionHealthService(
+            _config,
+            _providers,
+            _tuner,
+            isServerIdle: () => _server.ActiveTuners.Count == 0,
+            log: AppendLog,
+            notifyUser: (title, msg, isWarning) =>
+                Dispatcher.InvokeAsync(() => ShowTrayBalloon(title, msg, isWarning)));
         _server.TunersChanged += UpdateTunerStatus;
 _server.ConfigOrLineupChanged += () => Dispatcher.InvokeAsync(() =>
 {
@@ -74,12 +83,14 @@ _server.ConfigOrLineupChanged += () => Dispatcher.InvokeAsync(() =>
             AppendLog($"[Init] Providers Path: {_providers.ProvidersRoot}");
             AppendLog($"[Init] Chrome Path: {_config.ResolvedChromePath}");
             await _server.StartAsync();
+			_healthService.Start();
         };
 
         Closing += OnWindowClosing;
 
         Closed += async (_, _) =>
         {
+            await _healthService.DisposeAsync();
             RemoveSystemTrayIcon();
             await _server.DisposeAsync();
         };
@@ -897,6 +908,9 @@ _server.ConfigOrLineupChanged += () => Dispatcher.InvokeAsync(() =>
 
         var syncItem = new MenuItem { Header = "Sync Tuner 1 Login to Tuners 2–4" };
         syncItem.Click += (_, _) => _tuner.SyncMasterAuthToAllTuners(AppendLog);
+		
+		var healthItem = new MenuItem { Header = "Check Provider Sessions Now" };
+        healthItem.Click += (_, _) => _ = _healthService.RunCheckNowAsync();
 
         var exitItem = new MenuItem { Header = "Exit Charon Server" };
         exitItem.Click += (_, _) =>
@@ -907,6 +921,7 @@ _server.ConfigOrLineupChanged += () => Dispatcher.InvokeAsync(() =>
 
         _trayMenu.Items.Add(openItem);
         _trayMenu.Items.Add(syncItem);
+		_trayMenu.Items.Add(healthItem);
         _trayMenu.Items.Add(new Separator());
         _trayMenu.Items.Add(exitItem);
     }
@@ -938,7 +953,7 @@ _server.ConfigOrLineupChanged += () => Dispatcher.InvokeAsync(() =>
         Activate();
     }
 
-    private void ShowTrayBalloon(string title, string text)
+   private void ShowTrayBalloon(string title, string text, bool isWarning = false)
     {
         if (!_trayIconAdded) return;
 
@@ -948,9 +963,9 @@ _server.ConfigOrLineupChanged += () => Dispatcher.InvokeAsync(() =>
             hWnd = _hwnd,
             uID = TrayIconId,
             uFlags = NIF_INFO,
-            szInfoTitle = title,
-            szInfo = text,
-            dwInfoFlags = NIIF_INFO
+            szInfoTitle = title.Length > 63 ? title[..63] : title,
+            szInfo = text.Length > 255 ? text[..255] : text,
+            dwInfoFlags = isWarning ? NIIF_WARNING : NIIF_INFO
         };
         Shell_NotifyIcon(NIM_MODIFY, ref data);
     }
@@ -1005,6 +1020,7 @@ _server.ConfigOrLineupChanged += () => Dispatcher.InvokeAsync(() =>
     private const uint NIF_TIP = 0x00000004;
     private const uint NIF_INFO = 0x00000010;
     private const uint NIIF_INFO = 0x00000001;
+	private const uint NIIF_WARNING = 0x00000002;
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct NOTIFYICONDATA
