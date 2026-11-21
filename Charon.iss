@@ -1,5 +1,5 @@
 #define MyAppName "Charon"
-#define MyAppVersion "1.1.1"
+#define MyAppVersion "1.1.2"
 #define MyAppPublisher "Charon"
 #define MyAppExeName "Charon.exe"
 
