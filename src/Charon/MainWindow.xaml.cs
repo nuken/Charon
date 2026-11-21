@@ -944,13 +944,15 @@ _server.ConfigOrLineupChanged += () => Dispatcher.InvokeAsync(() =>
         }
     }
 
-    private void RestoreFromTray()
+    public void RestoreFromTray()
     {
         ShowInTaskbar = true;
         Show();
         if (WindowState == WindowState.Minimized)
             WindowState = WindowState.Normal;
         Activate();
+        if (_hwnd != IntPtr.Zero)
+            SetForegroundWindow(_hwnd);
     }
 
    private void ShowTrayBalloon(string title, string text, bool isWarning = false)
