@@ -38,21 +38,52 @@
   const selectChannelFromGuide = () => {
     let target = '';
     try { target = sessionStorage.getItem('__charonUsaTarget') || ''; } catch {}
-    if (!target || window.__charonUsaChannelSelected === target) return false;
+    if (!target || window.__charonUsaChannelConfirmed === target) return false;
+
+    // Wait until the Video.js player is mounted so its channel-switch handler is ready
+    const v = findMainVideo();
+    if (!v) return true;
 
     const rows = Array.from(document.querySelectorAll('.epg-channel-feed-container'));
-    if (rows.length === 0) return true; // Guide not hydrated yet
+    if (rows.length === 0) return true;
 
-    const prefix = target.trim().toLowerCase() + ' ';
+    const targetLower = target.trim().toLowerCase();
+    const now = Date.now();
 
+    // USA-East is already the default stream on /live; click once and proceed
+    if (targetLower === 'usa-east') {
+      window.__charonUsaChannelConfirmed = target;
+      return false;
+    }
+
+    // If we already clicked, check whether Video.js switched to a new MediaSource blob URL
+    if (window.__charonUsaClickAttempts > 0) {
+      const currentSrc = v.currentSrc || '';
+      if (currentSrc && currentSrc !== window.__charonUsaInitialSrc) {
+        window.__charonUsaChannelConfirmed = target;
+        window.__charonUsaSelectedAt = now;
+        return false;
+      }
+      // Give each click 1.5s to take effect before retrying (max 4 attempts)
+      if (now - (window.__charonUsaLastClickAt || 0) < 1500) return true;
+      if (window.__charonUsaClickAttempts >= 4) {
+        window.__charonUsaChannelConfirmed = target;
+        return false;
+      }
+    } else {
+      // Record the default USA-East src before our first click
+      window.__charonUsaInitialSrc = v.currentSrc || '';
+    }
+
+    const prefix = targetLower + ' ';
     for (const row of rows) {
       const firstTile = row.querySelector('.epg-tile-container');
       const info = firstTile?.querySelector('.tile-info') || row.querySelector('.tile-info');
       const aria = (info?.getAttribute('aria-label') || '').trim().toLowerCase();
 
       if (aria.startsWith(prefix)) {
-        window.__charonUsaChannelSelected = target;
-        window.__charonUsaSelectedAt = Date.now();
+        window.__charonUsaClickAttempts = (window.__charonUsaClickAttempts || 0) + 1;
+        window.__charonUsaLastClickAt = now;
         const clickTarget = firstTile?.querySelector('a, button') || info || firstTile;
         if (clickTarget) clickTarget.click();
         return true;
