@@ -24,7 +24,10 @@ public sealed class SessionHealthService : IAsyncDisposable
     private readonly SemaphoreSlim _runLock = new(1, 1);
     private CancellationTokenSource? _cts;
     private Task? _loopTask;
-    private DateTime _lastCompletedUtc = DateTime.MinValue;
+    private readonly Dictionary<string, DateTime> _lastCheckedUtc = new(StringComparer.OrdinalIgnoreCase);
+
+    private TimeSpan GetCheckInterval(string providerId) =>
+        TimeSpan.FromHours(Math.Clamp(_config.SessionCheckIntervalHours, 1, 168));
 
     public SessionHealthService(
         CharonConfig config,
@@ -64,11 +67,7 @@ public sealed class SessionHealthService : IAsyncDisposable
                 if (!_config.EnableSessionHealthCheck)
                     continue;
 
-                var interval = TimeSpan.FromHours(Math.Clamp(_config.SessionCheckIntervalHours, 1, 168));
-                if (DateTime.UtcNow - _lastCompletedUtc >= interval)
-                {
-                    await RunPassAsync(force: false, ct);
-                }
+                await RunPassAsync(force: false, ct);
             }
             while (await timer.WaitForNextTickAsync(ct));
         }
@@ -85,12 +84,6 @@ public sealed class SessionHealthService : IAsyncDisposable
 
         try
         {
-            if (!_isServerIdle())
-            {
-                _log("[Health] Skipping session keep-alive pass because a tuner is currently active (will retry when idle).");
-                return;
-            }
-
             // Only rotate through enabled providers that have at least one visible (non-hidden) channel
             var activeProviders = _providers.Providers
                 .Where(p => p.Manifest.Enabled &&
@@ -98,14 +91,27 @@ public sealed class SessionHealthService : IAsyncDisposable
                             p.Channels.Any(c => !c.IsHidden))
                 .ToList();
 
-            if (activeProviders.Count == 0)
+            var now = DateTime.UtcNow;
+            var dueProviders = force
+                ? activeProviders
+                : activeProviders
+                    .Where(p => !_lastCheckedUtc.TryGetValue(p.Manifest.Id, out var last) ||
+                                (now - last) >= GetCheckInterval(p.Manifest.Id))
+                    .ToList();
+
+            if (dueProviders.Count == 0)
             {
                 if (force) _log("[Health] No active providers with visible channels to check.");
-                _lastCompletedUtc = DateTime.UtcNow;
                 return;
             }
 
-            _log($"[Health] Starting idle keep-alive & session check for {activeProviders.Count} active provider(s)...");
+            if (!_isServerIdle())
+            {
+                _log("[Health] Skipping session keep-alive pass because a tuner is currently active (will retry when idle).");
+                return;
+            }
+
+            _log($"[Health] Starting idle keep-alive & session check for {dueProviders.Count} due provider(s)...");
 
             var expiredNames = new List<string>();
             var expiringNames = new List<string>();
@@ -156,7 +162,7 @@ public sealed class SessionHealthService : IAsyncDisposable
                 int cmdId = 1;
                 await SendCdpCommandAsync(ws, cmdId++, "Page.enable", new { }, ct);
 
-                foreach (var provider in activeProviders)
+                foreach (var provider in dueProviders)
                 {
                     ct.ThrowIfCancellationRequested();
 
@@ -172,9 +178,9 @@ public sealed class SessionHealthService : IAsyncDisposable
 
                     string? json = await EvaluateJsStringAsync(ws, cmdId++, GetHealthCheckJs(provider.Manifest.Id), ct);
                     ParseHealthResult(provider, json, expiredNames, expiringNames);
-                }
 
-                _lastCompletedUtc = DateTime.UtcNow;
+                    _lastCheckedUtc[provider.Manifest.Id] = DateTime.UtcNow;
+                }
             }
             finally
             {
@@ -218,7 +224,7 @@ public sealed class SessionHealthService : IAsyncDisposable
             else if (force)
             {
                 _notifyUser("Charon — All Sessions Healthy",
-                    $"Verified {activeProviders.Count} active provider(s) and synced Tuners 2–4.", false);
+                    $"Verified {dueProviders.Count} active provider(s) and synced Tuners 2–4.", false);
             }
         }
         catch (OperationCanceledException) { }
@@ -299,8 +305,7 @@ public sealed class SessionHealthService : IAsyncDisposable
               return JSON.stringify({ state: 'expired', detail: 'Visible "Have a TV Provider? Connect now" prompt' });
             }
             return JSON.stringify({ state: 'ok', detail: href });
-          }
-
+          }		  
           // 3. Common redirect-to-login paths across YTTV, Hulu, Fubo, Sling, Philo, TVE sites
           if (/\/(welcome|login|signin|sign-in|signup|auth|mvpd|activate)\b/i.test(path) ||
               /accounts\.google\.com|login\.|auth\./i.test(location.hostname)) {

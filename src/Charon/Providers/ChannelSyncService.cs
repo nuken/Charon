@@ -26,9 +26,8 @@ public class ChannelSyncService
          providerId.Contains("abc", StringComparison.OrdinalIgnoreCase) ||
          providerId.Contains("cbs", StringComparison.OrdinalIgnoreCase) ||
          providerId.Contains("fox", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Contains("usa", StringComparison.OrdinalIgnoreCase) ||
-         providerId.Contains("espn", StringComparison.OrdinalIgnoreCase));
-		 
+         providerId.Contains("usa", StringComparison.OrdinalIgnoreCase));
+        		 
     public static async Task<(List<ProviderChannel> Channels, int MatchedCount)> ScanAndMatchAsync(
         CharonConfig config,
         LoadedProvider provider,
@@ -101,7 +100,6 @@ public class ChannelSyncService
 		bool isCbs = provider.Manifest.Id.Contains("cbs", StringComparison.OrdinalIgnoreCase);
 		bool isFox = provider.Manifest.Id.Contains("fox", StringComparison.OrdinalIgnoreCase);
 		bool isUsa = provider.Manifest.Id.Contains("usa", StringComparison.OrdinalIgnoreCase);
-		bool isEspn = provider.Manifest.Id.Contains("espn", StringComparison.OrdinalIgnoreCase);
 		string targetUrl = isSpectrum
             ? "https://watch.spectrum.net/guide"
             : isXfinity
@@ -126,9 +124,7 @@ public class ChannelSyncService
             ? "https://www.fox.com/live/channels"
 			: isUsa
             ? "https://www.usanetwork.com/live"
-			: isEspn
-            ? "https://www.espn.com/watch/"
-            : "https://tv.youtube.com/live";
+			: "https://tv.youtube.com/live";
 
         int posX = config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : -3200;
         int posY = config.WindowPlacement == WindowPlacementMode.VisibleDebug ? 80 : 0;
@@ -472,33 +468,7 @@ public class ChannelSyncService
                 }
                 return [];
             }
-			else if (isEspn)
-            {
-                string espnJs = GetEspnScraperJs();
-                var deadline = DateTime.UtcNow.AddSeconds(30);
-
-                while (DateTime.UtcNow < deadline)
-                {
-                    statusCallback($"Step 1/2: Scraping ESPN Watch live channels via espn.com/watch...");
-                    string? res = await EvaluateJsStringAsync(ws, 1, espnJs);
-
-                    if (!string.IsNullOrWhiteSpace(res))
-                    {
-                        if (res.StartsWith("{\"status\":", StringComparison.Ordinal))
-                        {
-                            log($"[Sync] {res}");
-                        }
-                        else if (res.StartsWith("[", StringComparison.Ordinal) && res != "[]")
-                        {
-                            var parsed = ProviderManager.ParseChannelsJson(res);
-                            if (parsed.Count > 0) return parsed;
-                        }
-                    }
-                    await Task.Delay(1000);
-                }
-                return [];
-            }
-            else
+			else
             {
                 // YouTube TV: Wait for <ytu-epg-row> data models to mount and auto-scroll #id-bottom-main-content
                 string yttvJs = GetYouTubeTvScraperJs();
@@ -1336,10 +1306,22 @@ public class ChannelSyncService
 
           const uuidRe = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
 
-          // Find the local ABC affiliate EPG row (e.g. <tr class="Channel__displays WSOC">)
-          // and read its exact /watch-live/<uuid> directly from its React fiber props
+          // Find the local ABC affiliate EPG row (e.g. <tr class="Channel__displays KATC">)
+          // and read its exact /watch-live/<id> from its React fiber (circular-safe)
           let localCallSign = '';
-          let localUuid = '';
+          let localUrl = '';
+
+          const safeStringify = (obj) => {
+            const seen = new WeakSet();
+            return JSON.stringify(obj, (k, v) => {
+              if (k.startsWith('_') || v instanceof Element) return undefined;
+              if (v && typeof v === 'object') {
+                if (seen.has(v)) return undefined;
+                seen.add(v);
+              }
+              return v;
+            });
+          };
 
           for (const row of document.querySelectorAll('.Channel__displays')) {
             const callClass = Array.from(row.classList).find(c => /^[WK][A-Z]{2,3}$/.test(c));
@@ -1347,24 +1329,41 @@ public class ChannelSyncService
 
             localCallSign = callClass;
             const fk = Object.keys(row).find(k => k.startsWith('__reactFiber'));
-            if (fk && row[fk]?.memoizedProps) {
+            let f = fk ? row[fk] : null;
+
+            for (let depth = 0; f && depth < 10 && !localUrl; depth++, f = f.return) {
+              if (!f.memoizedProps) continue;
               try {
-                const raw = JSON.stringify(
-                  row[fk].memoizedProps,
-                  (k, v) => (k.startsWith('_') || v instanceof Element) ? undefined : v
-                );
-                const m = raw?.match(/"urlValue"\s*:\s*"\/watch-live\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i);
-                if (m) localUuid = m[1].toLowerCase();
+                const raw = safeStringify(f.memoizedProps);
+                const m = raw?.match(/"urlValue"\s*:\s*"((?:https?:\/\/[^"]*)?\/watch-live\/[^"]+)"/i);
+                if (m) {
+                  localUrl = m[1].startsWith('http') ? m[1] : `https://abc.com${m[1]}`;
+                }
               } catch {}
             }
             break;
           }
 
-          window.__charonAbcAttempts = (window.__charonAbcAttempts || 0) + 1;
-          if (!localUuid && window.__charonAbcAttempts <= 12) {
-            return JSON.stringify({ status: 'waiting_for_abc_local_fiber', callSign: localCallSign, url: location.href });
+          // Fallback: check window['__abc-com__'] for a channel matching the call sign
+          if (localCallSign && !localUrl) {
+            const modules = window['__abc-com__']?.page?.content?.shell?.module || [];
+            const match = modules
+              .flatMap(m => m?.channels || [])
+              .find(c => c && c.urlValue && (
+                String(c.aff || '').toUpperCase() === localCallSign ||
+                String(c.title || '').toUpperCase().includes(localCallSign)
+              ));
+            if (match?.urlValue) {
+              localUrl = match.urlValue.startsWith('http')
+                ? match.urlValue
+                : `https://abc.com${match.urlValue}`;
+            }
           }
 
+          window.__charonAbcAttempts = (window.__charonAbcAttempts || 0) + 1;
+          if (!localUrl && window.__charonAbcAttempts <= 12) {
+            return JSON.stringify({ status: 'waiting_for_abc_local_fiber', callSign: localCallSign, url: location.href });
+          }
           // Core National lineup with verified permanent UUIDs and Gracenote StationIds
           const coreNational = [
             { Id: "abc-news-live", Name: "ABC News Live", ChannelNumber: "251", StationId: "113380", Url: "https://abc.com/watch-live/784b058c-3aee-4ec9-a6d3-754ba6e4dbac", IsHidden: false },
@@ -1383,15 +1382,16 @@ public class ChannelSyncService
           const results = [];
           const seenUuids = new Set();
 
-          // 1. Add Local ABC Affiliate first (e.g. WSOC -> matched to Gracenote by Channels DVR)
-          if (localCallSign && localUuid) {
-            seenUuids.add(localUuid);
+          // 1. Add Local ABC Affiliate first (e.g. WSOC / KATC -> matched to Gracenote by Channels DVR)
+          if (localCallSign && localUrl) {
+            const m = localUrl.match(uuidRe);
+            if (m) seenUuids.add(m[1].toLowerCase());
             results.push({
               Id: "abc-local",
               Name: localCallSign,
               ChannelNumber: "250",
               StationId: "",
-              Url: `https://abc.com/watch-live/${localUuid}`,
+              Url: localUrl,
               IsHidden: false
             });
           }
@@ -1674,64 +1674,6 @@ public class ChannelSyncService
 
           if (results.length === 0) {
             return JSON.stringify({ status: 'waiting_for_usa_epg_rows', url: location.href });
-          }
-
-          return JSON.stringify(results);
-        })()
-        """;
-		
-		private static string GetEspnScraperJs() => """
-        (async () => {
-          if (!location.hostname.includes('espn.com')) {
-            return JSON.stringify({ status: 'waiting_for_page', url: location.href });
-          }
-
-          // Scroll down to trigger lazy-loading of the Channels row near the footer
-          let links = Array.from(document.querySelectorAll('a[data-track-nav_item*="|channels|"]'));
-          if (links.length === 0) {
-            window.scrollTo(0, document.body.scrollHeight);
-            await new Promise(r => setTimeout(r, 600));
-            links = Array.from(document.querySelectorAll('a[data-track-nav_item*="|channels|"]'));
-          }
-
-          if (links.length === 0) {
-            return JSON.stringify({ status: 'waiting_for_espn_channels_row', url: location.href });
-          }
-
-          const renameMap = {
-            'ACCN': 'ACC Network'
-          };
-
-          // Keep linear 24/7 networks visible by default; hide event hubs / conference / plus shelves
-          const coreLinear = new Set([
-            'ESPN', 'ESPN2', 'ESPNU', 'ESPNews', 'SEC Network', 'ACC Network', 'NFL Network', 'ESPN Deportes'
-          ]);
-
-          const results = [];
-          const seen = new Set();
-          let chNum = 320;
-
-          for (const a of links) {
-            const rawTitle = (a.getAttribute('data-track-title') || a.getAttribute('aria-label') || '').trim();
-            const href = (a.getAttribute('href') || '').trim();
-            if (!rawTitle || !href) continue;
-
-            const name = renameMap[rawTitle] || rawTitle;
-            const key = name.toLowerCase();
-            if (seen.has(key)) continue;
-            seen.add(key);
-
-            const fullUrl = href.startsWith('http') ? href : `https://www.espn.com${href}`;
-            const slug = key.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-            results.push({
-              Id: `espn-${slug}`,
-              Name: name,
-              ChannelNumber: String(chNum++),
-              StationId: '',
-              Url: fullUrl,
-              IsHidden: !coreLinear.has(name)
-            });
           }
 
           return JSON.stringify(results);
