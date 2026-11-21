@@ -1334,14 +1334,35 @@ public class ChannelSyncService
             return JSON.stringify({ status: 'waiting_for_page', url: location.href });
           }
 
-          // Wait until the client-side router has resolved /watch-live/<local-uuid> and rendered the first carousel tile
-          const firstTile = document.querySelector('a.AnchorLink[aria-label^="ABC (1 of "]')
-            || Array.from(document.querySelectorAll('a[aria-label]')).find(a => /^ABC\s*\(1 of \d+\)/i.test(a.getAttribute('aria-label') || ''));
-          const pathUuidMatch = location.pathname.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+          const uuidRe = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i;
+
+          // Find the local ABC affiliate EPG row (e.g. <tr class="Channel__displays WSOC">)
+          // and read its exact /watch-live/<uuid> directly from its React fiber props
+          let localCallSign = '';
+          let localUuid = '';
+
+          for (const row of document.querySelectorAll('.Channel__displays')) {
+            const callClass = Array.from(row.classList).find(c => /^[WK][A-Z]{2,3}$/.test(c));
+            if (!callClass) continue;
+
+            localCallSign = callClass;
+            const fk = Object.keys(row).find(k => k.startsWith('__reactFiber'));
+            if (fk && row[fk]?.memoizedProps) {
+              try {
+                const raw = JSON.stringify(
+                  row[fk].memoizedProps,
+                  (k, v) => (k.startsWith('_') || v instanceof Element) ? undefined : v
+                );
+                const m = raw?.match(/"urlValue"\s*:\s*"\/watch-live\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/i);
+                if (m) localUuid = m[1].toLowerCase();
+              } catch {}
+            }
+            break;
+          }
 
           window.__charonAbcAttempts = (window.__charonAbcAttempts || 0) + 1;
-          if ((!firstTile || !pathUuidMatch) && window.__charonAbcAttempts <= 10) {
-            return JSON.stringify({ status: 'waiting_for_local_affiliate_redirect', url: location.href });
+          if (!localUuid && window.__charonAbcAttempts <= 12) {
+            return JSON.stringify({ status: 'waiting_for_abc_local_fiber', callSign: localCallSign, url: location.href });
           }
 
           // Core National lineup with verified permanent UUIDs and Gracenote StationIds
@@ -1362,31 +1383,22 @@ public class ChannelSyncService
           const results = [];
           const seenUuids = new Set();
 
-          // 1. Add Local ABC Affiliate first (e.g. WSOC -> matched to 11849 by Channels DVR)
-          if (firstTile && pathUuidMatch) {
-            const localUuid = pathUuidMatch[1].toLowerCase();
-            const aria = firstTile.getAttribute('aria-label') || '';
-            const callMatch = aria.match(/^ABC\s*\(1 of \d+\)\s+([WK][A-Z0-9]{2,4})\b/i);
-            const callSign = callMatch ? callMatch[1].toUpperCase() : 'ABC Local';
-
-            const isStaticNational = coreNational.some(c => c.Url.toLowerCase().includes(localUuid));
-            const localUrl = isStaticNational ? 'https://abc.com/watch-live' : `https://abc.com/watch-live/${localUuid}`;
-
-            if (!isStaticNational) seenUuids.add(localUuid);
-
+          // 1. Add Local ABC Affiliate first (e.g. WSOC -> matched to Gracenote by Channels DVR)
+          if (localCallSign && localUuid) {
+            seenUuids.add(localUuid);
             results.push({
               Id: "abc-local",
-              Name: callSign,
+              Name: localCallSign,
               ChannelNumber: "250",
-              StationId: "", // Left blank so MatchGracenoteStationsAsync resolves WSOC -> 11849!
-              Url: localUrl,
+              StationId: "",
+              Url: `https://abc.com/watch-live/${localUuid}`,
               IsHidden: false
             });
           }
 
           // 2. Add all 11 Core National channels
           for (const ch of coreNational) {
-            const m = ch.Url.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+            const m = ch.Url.match(uuidRe);
             if (m) seenUuids.add(m[1].toLowerCase());
             results.push(ch);
           }
@@ -1397,7 +1409,7 @@ public class ChannelSyncService
           let extraNum = 262;
 
           for (const c of rawChannels) {
-            const uuidMatch = String(c.urlValue || '').match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+            const uuidMatch = String(c.urlValue || '').match(uuidRe);
             if (!uuidMatch) continue;
 
             const uuid = uuidMatch[1].toLowerCase();
