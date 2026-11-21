@@ -39,6 +39,9 @@ Name: "startup"; Description: "Start Charon automatically when Windows starts"; 
 ; 1. Copy all published .NET runtime files, Charon.exe, and ffmpeg.exe (exclude Profiles, TabCaptureExt, user configs, locks, and .bak backups)
 Source: "C:\Charon\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "Profiles\*,TabCaptureExt\*,config.json,channels.json,LOCK*,Singleton*,*.bak"
 
+[InstallDelete]
+Type: filesandordirs; Name: "{app}\Providers\ESPN"
+
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
