@@ -173,7 +173,12 @@ public sealed class SessionHealthService : IAsyncDisposable
                         return;
                     }
 
-                    await SendCdpCommandAsync(ws, cmdId++, "Page.navigate", new { url = provider.Manifest.LoginUrl }, ct);
+                    bool isCbs = provider.Manifest.Id.Contains("cbs", StringComparison.OrdinalIgnoreCase);
+                    string checkUrl = isCbs
+                        ? "https://www.cbs.com/live-tv/stream/"
+                        : provider.Manifest.LoginUrl;
+
+                    await SendCdpCommandAsync(ws, cmdId++, "Page.navigate", new { url = checkUrl }, ct);
                     await Task.Delay(TimeSpan.FromSeconds(6), ct);
 
                     string? json = await EvaluateJsStringAsync(ws, cmdId++, GetHealthCheckJs(provider.Manifest.Id), ct);
@@ -303,6 +308,14 @@ public sealed class SessionHealthService : IAsyncDisposable
             const bodyText = document.body?.innerText || '';
             if (/have a tv provider\?/i.test(bodyText) && /connect now/i.test(bodyText)) {
               return JSON.stringify({ state: 'expired', detail: 'Visible "Have a TV Provider? Connect now" prompt' });
+            }
+            return JSON.stringify({ state: 'ok', detail: href });
+          }	
+          // 2b. CBS: flag the TVE provider sign-in notice or expired-session account settings error
+          if (id.includes('cbs')) {
+            const bodyText = document.body?.innerText || '';
+            if (/error with this account'?s settings|unable to continue|sign in with your tv provider|verify your tv provider|choose your tv provider/i.test(bodyText)) {
+              return JSON.stringify({ state: 'expired', detail: 'CBS TVE session expired or provider sign-in required' });
             }
             return JSON.stringify({ state: 'ok', detail: href });
           }		  
