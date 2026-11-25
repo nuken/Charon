@@ -26,8 +26,16 @@ public sealed class SessionHealthService : IAsyncDisposable
     private Task? _loopTask;
     private readonly Dictionary<string, DateTime> _lastCheckedUtc = new(StringComparer.OrdinalIgnoreCase);
 
-    private TimeSpan GetCheckInterval(string providerId) =>
-        TimeSpan.FromHours(Math.Clamp(_config.SessionCheckIntervalHours, 1, 168));
+    private TimeSpan GetCheckInterval(string providerId)
+    {
+        int hours = Math.Clamp(_config.SessionCheckIntervalHours, 1, 168);
+        if (providerId.Contains("cnn", StringComparison.OrdinalIgnoreCase) ||
+        providerId.Contains("cbs", StringComparison.OrdinalIgnoreCase))
+    {
+        hours = Math.Min(hours, 6);
+    }
+    return TimeSpan.FromHours(hours);
+    }
 
     public SessionHealthService(
         CharonConfig config,
@@ -132,6 +140,11 @@ public sealed class SessionHealthService : IAsyncDisposable
                 "--no-first-run",
                 "--no-default-browser-check",
                 "--disable-blink-features=AutomationControlled",
+                "--autoplay-policy=no-user-gesture-required",
+                "--disable-background-media-suspend",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
                 "--mute-audio",
                 "\"about:blank\""
             ]);
@@ -156,35 +169,94 @@ public sealed class SessionHealthService : IAsyncDisposable
                     return;
                 }
 
-                using var ws = new ClientWebSocket();
-                await ws.ConnectAsync(new Uri(wsUrl), ct);
-
+                ClientWebSocket? ws = null;
                 int cmdId = 1;
-                await SendCdpCommandAsync(ws, cmdId++, "Page.enable", new { }, ct);
 
-                foreach (var provider in dueProviders)
+                async Task<ClientWebSocket> EnsureConnectedAsync()
                 {
-                    ct.ThrowIfCancellationRequested();
+                    if (ws is { State: WebSocketState.Open })
+                        return ws;
 
-                    // Abort immediately if a client starts streaming while we're rotating
-                    if (!_isServerIdle())
+                    ws?.Dispose();
+                    ws = new ClientWebSocket();
+                    await ws.ConnectAsync(new Uri(wsUrl), ct);
+                    await SendCdpCommandAsync(ws, cmdId++, "Page.enable", new { }, ct);
+                    await SendCdpCommandAsync(ws, cmdId++, "Emulation.setFocusEmulationEnabled", new { enabled = true }, ct);
+                    return ws;
+                }
+
+                try
+                {
+                    foreach (var provider in dueProviders)
                     {
-                        _log("[Health] A tuner became active mid-check — stopping keep-alive pass immediately.");
-                        return;
+                        ct.ThrowIfCancellationRequested();
+
+                        // Abort immediately if a client starts streaming while we're rotating
+                        if (!_isServerIdle())
+                        {
+                            _log("[Health] A tuner became active mid-check — stopping keep-alive pass immediately.");
+                            return;
+                        }
+
+                        var activeWs = await EnsureConnectedAsync();
+
+                        bool isCbs = provider.Manifest.Id.Contains("cbs", StringComparison.OrdinalIgnoreCase);
+                        bool isCnn = provider.Manifest.Id.Contains("cnn", StringComparison.OrdinalIgnoreCase);
+                        string checkUrl = isCbs
+                            ? "https://www.cbs.com/live-tv/stream/tveverywhere/"
+                            : isCnn
+                                ? "https://www.cnn.com/videos/cnn"
+                                : provider.Manifest.LoginUrl;
+
+                        await SendCdpCommandAsync(activeWs, cmdId++, "Page.navigate", new { url = checkUrl }, ct);
+
+                        string? json = null;
+                        if (isCnn || isCbs)
+                        {
+                            // Give heavy TVE players 4s to commit navigation before polling
+                            await Task.Delay(TimeSpan.FromSeconds(4), ct);
+
+                            var deadline = DateTime.UtcNow.AddSeconds(isCbs ? 20 : 18);
+                            while (DateTime.UtcNow < deadline)
+                            {
+                                if (!_isServerIdle())
+                                {
+                                    _log("[Health] A tuner became active mid-check — stopping keep-alive pass immediately.");
+                                    return;
+                                }
+
+                                activeWs = await EnsureConnectedAsync();
+                                json = await EvaluateJsStringAsync(activeWs, cmdId++, GetHealthCheckJs(provider.Manifest.Id), ct);
+                                if (!string.IsNullOrWhiteSpace(json) && !json.Contains("\"state\":\"pending\"", StringComparison.Ordinal))
+                                    break;
+
+                                await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                            }
+
+                            // Unload active video/DRM stream before navigating to the next provider
+                            if (ws is { State: WebSocketState.Open })
+                            {
+                                try
+                                {
+                                    await SendCdpCommandAsync(ws, cmdId++, "Page.navigate", new { url = "about:blank" }, ct);
+                                    await Task.Delay(300, ct);
+                                }
+                                catch { }
+                            }
+                        }
+                        else
+                        {
+                            await Task.Delay(TimeSpan.FromSeconds(6), ct);
+                            json = await EvaluateJsStringAsync(activeWs, cmdId++, GetHealthCheckJs(provider.Manifest.Id), ct);
+                        }
+
+                        ParseHealthResult(provider, json, expiredNames, expiringNames);
+                        _lastCheckedUtc[provider.Manifest.Id] = DateTime.UtcNow;
                     }
-
-                    bool isCbs = provider.Manifest.Id.Contains("cbs", StringComparison.OrdinalIgnoreCase);
-                    string checkUrl = isCbs
-                        ? "https://www.cbs.com/live-tv/stream/"
-                        : provider.Manifest.LoginUrl;
-
-                    await SendCdpCommandAsync(ws, cmdId++, "Page.navigate", new { url = checkUrl }, ct);
-                    await Task.Delay(TimeSpan.FromSeconds(6), ct);
-
-                    string? json = await EvaluateJsStringAsync(ws, cmdId++, GetHealthCheckJs(provider.Manifest.Id), ct);
-                    ParseHealthResult(provider, json, expiredNames, expiringNames);
-
-                    _lastCheckedUtc[provider.Manifest.Id] = DateTime.UtcNow;
+                }
+                finally
+                {
+                    ws?.Dispose();
                 }
             }
             finally
@@ -203,7 +275,11 @@ public sealed class SessionHealthService : IAsyncDisposable
 
                 if (chromeProc is { HasExited: false })
                 {
-                    try { chromeProc.Kill(entireProcessTree: true); } catch { }
+                    try { chromeProc.WaitForExit(2000); } catch { }
+                    if (!chromeProc.HasExited)
+                    {
+                        try { chromeProc.Kill(entireProcessTree: true); } catch { }
+                    }
                 }
             }
 
@@ -232,7 +308,7 @@ public sealed class SessionHealthService : IAsyncDisposable
                     $"Verified {dueProviders.Count} active provider(s) and synced Tuners 2–4.", false);
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { }
         catch (Exception ex)
         {
             _log($"[Health] Error during session check: {ex.Message}");
@@ -271,6 +347,9 @@ public sealed class SessionHealthService : IAsyncDisposable
                     expiringNames.Add(provider.Manifest.Name);
                     _log($"[Health] [EXPIRING] {provider.Manifest.Name}: {detail}");
                     break;
+				case "pending":
+                    _log($"[Health] [??] {provider.Manifest.Name}: Timed out waiting for session check ({detail})");
+                    break;
                 default:
                     _log($"[Health] [OK] {provider.Manifest.Name}: Session active ({detail})");
                     break;
@@ -303,22 +382,68 @@ public sealed class SessionHealthService : IAsyncDisposable
             return JSON.stringify({ state: 'ok', detail: 'oauth_token present' });
           }
 
-          // 2. CNN: ignore regular CNN account "Sign in" and only flag the TVE "Have a TV Provider? ... Connect now" prompt
+          // 2. CNN: verify Adobe Pass shortAuthorize or active video, and flag TVE login prompt
           if (id.includes('cnn')) {
             const bodyText = document.body?.innerText || '';
             if (/have a tv provider\?/i.test(bodyText) && /connect now/i.test(bodyText)) {
               return JSON.stringify({ state: 'expired', detail: 'Visible "Have a TV Provider? Connect now" prompt' });
             }
-            return JSON.stringify({ state: 'ok', detail: href });
-          }	
-          // 2b. CBS: flag the TVE provider sign-in notice or expired-session account settings error
+            const hitShortAuth = performance.getEntriesByType('resource')
+              .some(r => /sp\.auth\.adobe\.com\/adobe-services\/shortAuthorize/i.test(r.name));
+            const hasPlayingVideo = Array.from(document.querySelectorAll('video'))
+              .some(v => v.readyState >= 2 || v.currentTime > 0);
+
+            if (hitShortAuth || hasPlayingVideo) {
+              return JSON.stringify({ state: 'ok', detail: hitShortAuth ? 'shortAuthorize verified' : 'video active' });
+            }
+            return JSON.stringify({ state: 'pending', detail: 'Waiting for AccessEnabler shortAuthorize...' });
+          }
+          // 2b. CBS: click "Start Watching" overlay, then verify auth cookie + active video/shortAuthorize
           if (id.includes('cbs')) {
             const bodyText = document.body?.innerText || '';
             if (/error with this account'?s settings|unable to continue|sign in with your tv provider|verify your tv provider|choose your tv provider/i.test(bodyText)) {
               return JSON.stringify({ state: 'expired', detail: 'CBS TVE session expired or provider sign-in required' });
             }
-            return JSON.stringify({ state: 'ok', detail: href });
-          }		  
+
+            const queryAllDeep = (selector, root = document) => {
+              const results = Array.from(root.querySelectorAll(selector));
+              for (const el of root.querySelectorAll('*')) {
+                if (el.shadowRoot) results.push(...queryAllDeep(selector, el.shadowRoot));
+              }
+              return results;
+            };
+
+            const startBtn = queryAllDeep('button, a, div[role="button"], span, .button')
+              .find(el => {
+                const t = (el.textContent || '').trim().toLowerCase();
+                return t === 'start watching' || t === 'start watching »' ||
+                       el.getAttribute('aria-label')?.toLowerCase() === 'start watching';
+              });
+            if (startBtn && Date.now() - (window.__charonCbsHealthClickAt || 0) > 2500) {
+              window.__charonCbsHealthClickAt = Date.now();
+              startBtn.click();
+              return JSON.stringify({ state: 'pending', detail: `Clicked Start Watching on ${location.pathname}` });
+            }
+
+            const hasMvpdAuthz = document.cookie.includes('mvpd_authz=');
+            const hasCbsCom = document.cookie.includes('CBS_COM=');
+            const hitShortAuth = performance.getEntriesByType('resource')
+              .some(r => /sp\.auth\.adobe\.com\/adobe-services\/shortAuthorize/i.test(r.name));
+            const videos = queryAllDeep('video');
+            const hasPlayingVideo = videos.some(v => v.readyState >= 2 || v.currentTime > 0);
+
+            if ((hasMvpdAuthz || hasCbsCom) && (hasPlayingVideo || hitShortAuth)) {
+              const authTag = hasMvpdAuthz ? 'mvpd_authz' : 'CBS_COM';
+              const playTag = hasPlayingVideo ? 'video active' : 'shortAuthorize verified';
+              return JSON.stringify({ state: 'ok', detail: `${authTag} + ${playTag} (${location.pathname})` });
+            }
+
+            const snippet = bodyText.replace(/\s+/g, ' ').trim().slice(0, 80);
+            return JSON.stringify({
+              state: 'pending',
+              detail: `url=${location.pathname} mvpd_authz=${hasMvpdAuthz} CBS_COM=${hasCbsCom} videos=${videos.length} shortAuth=${hitShortAuth} text="${snippet}"`
+            });
+          }
           // 3. Common redirect-to-login paths across YTTV, Hulu, Fubo, Sling, Philo, TVE sites
           if (/\/(welcome|login|signin|sign-in|signup|auth|mvpd|activate)\b/i.test(path) ||
               /accounts\.google\.com|login\.|auth\./i.test(location.hostname)) {
@@ -388,42 +513,58 @@ public sealed class SessionHealthService : IAsyncDisposable
 
     private static async Task<string?> EvaluateJsStringAsync(ClientWebSocket ws, int id, string expression, CancellationToken ct)
     {
-        await SendCdpCommandAsync(ws, id, "Runtime.evaluate", new
+        try
         {
-            expression,
-            returnByValue = true,
-            awaitPromise = true
-        }, ct);
-
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(8));
-
-        var buffer = new byte[65536];
-        using var ms = new MemoryStream();
-
-        while (ws.State == WebSocketState.Open)
-        {
-            var res = await ws.ReceiveAsync(buffer, timeoutCts.Token);
-            ms.Write(buffer, 0, res.Count);
-            if (res.EndOfMessage)
+            await SendCdpCommandAsync(ws, id, "Runtime.evaluate", new
             {
-                string msg = Encoding.UTF8.GetString(ms.ToArray());
-                ms.SetLength(0);
+                expression,
+                returnByValue = true,
+                awaitPromise = true,
+                userGesture = true
+            }, ct);
 
-                using var doc = JsonDocument.Parse(msg);
-                if (doc.RootElement.TryGetProperty("id", out var msgId) && msgId.GetInt32() == id)
-                {
-                    if (doc.RootElement.TryGetProperty("result", out var resultEl) &&
-                        resultEl.TryGetProperty("result", out var innerResult) &&
-                        innerResult.TryGetProperty("value", out var valEl) &&
-                        valEl.ValueKind == JsonValueKind.String)
-                    {
-                        return valEl.GetString();
-                    }
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(12));
+
+            var buffer = new byte[65536];
+            using var ms = new MemoryStream();
+
+            while (ws.State == WebSocketState.Open)
+            {
+                var res = await ws.ReceiveAsync(buffer, timeoutCts.Token);
+                if (res.MessageType == WebSocketMessageType.Close)
                     return null;
+
+                ms.Write(buffer, 0, res.Count);
+                if (res.EndOfMessage)
+                {
+                    string msg = Encoding.UTF8.GetString(ms.ToArray());
+                    ms.SetLength(0);
+
+                    using var doc = JsonDocument.Parse(msg);
+                    if (doc.RootElement.TryGetProperty("id", out var msgId) && msgId.GetInt32() == id)
+                    {
+                        if (doc.RootElement.TryGetProperty("result", out var resultEl) &&
+                            resultEl.TryGetProperty("result", out var innerResult) &&
+                            innerResult.TryGetProperty("value", out var valEl) &&
+                            valEl.ValueKind == JsonValueKind.String)
+                        {
+                            return valEl.GetString();
+                        }
+                        return null;
+                    }
                 }
             }
         }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (WebSocketException)
+        {
+            return null;
+        }
+
         return null;
     }
 
