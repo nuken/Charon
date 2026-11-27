@@ -1,0 +1,8 @@
+{
+  "id": "espn",
+  "name": "ESPN (TVE)",
+  "groupTitle": "ESPN (TVE)",
+  "enabled": true,
+  "loginUrl": "https://www.espn.com/watch/",
+  "tuneScriptDelayMs": 1500
+}
